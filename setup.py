@@ -19,7 +19,7 @@ setup(
           'requests',
     ],
     url="https://github.com/mcdeoliveira/pyoptimum",
-    download_url="https://github.com/mcdeoliveira/pyoptimum/archive/0.1.tar.gz",
+    download_url="https://github.com/mcdeoliveira/pyoptimum/archive/v0.1.tar.gz",
 
     classifiers=[
         'Development Status :: 3 - Alpha',
