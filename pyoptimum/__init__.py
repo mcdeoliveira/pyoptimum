@@ -1,6 +1,7 @@
 import base64
 import warnings
 import requests
+import json
 
 
 class Client:
@@ -55,13 +56,14 @@ class Client:
             # try renewing token
             self.get_token()
 
+        # See https://github.com/psf/requests/issues/6014
         headers = {
             'Content-type': 'application/json',
             'Accept': 'application/json',
             'X-Api-Key': self.token
         }
         resp = requests.post(self.base_url + '/' + api,
-                             json=data,
+                             data=json.dumps(data),
                              headers=headers)
 
         if resp.ok:
