@@ -10,7 +10,7 @@ Welcome to PyOptimum's documentation!
    :maxdepth: 2
    :caption: User Guide:
 
-   usage/quickstart
+   src/quickstart
 
 .. toctree::
    :maxdepth: 2

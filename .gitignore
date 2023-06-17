@@ -105,3 +105,8 @@ venv.bak/
 
 # .idea
 .idea
+
+# sphinx
+doc/_build
+doc/_static
+doc/_templates
