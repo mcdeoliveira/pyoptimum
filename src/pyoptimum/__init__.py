@@ -6,13 +6,16 @@ import json
 
 
 class PyOptimumException(Exception):
+    """
+    pyoptimum Exception
+    """
     pass
 
 
 class Client:
     """
     Client object to facilitate connection to the
-    `optmize.vicbee.net <https:optmize.vicbee.net>`_ optimization api
+    `optimize.vicbee.net <https:optimize.vicbee.net>`_ optimization api
 
     :param username: the username
     :param password: the password
@@ -81,7 +84,7 @@ class Client:
 
         :param entry_point: the api entry point
         :param data: the data
-        :return: json object with the response
+        :return: dictionary with the response
         """
 
         if self.token is None and not self.auto_token_renewal:
