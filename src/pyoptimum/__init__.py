@@ -56,7 +56,8 @@ class Client:
         Retrieve authentication token
         """
 
-        basic = base64.b64encode(bytes('{}:{}'.format(self.username, self.password), 'utf-8')).decode('utf-8')
+        basic = base64.b64encode(bytes('{}:{}'.format(self.username, self.password),
+                                       'utf-8')).decode('utf-8')
         headers = {
             'Content-type': 'application/json',
             'Accept': 'application/json',
