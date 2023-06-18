@@ -7,7 +7,7 @@ Welcome to PyOptimum's documentation!
 =====================================
 
 This package contains some utility functions to facilitate the connection to the
-`Optimize API <https://optimize.vicbee.net>`_ in python. See
+`Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ in python. See
 `demo <https://vicbee.net/optimize.html>`_ for a more interesting jupyter
 notebook demo.
 
@@ -16,7 +16,7 @@ This library is a simple wrapper of the
 python library that helps making token management transparent to the user.
 
 Documentation is limited to the functionality provided by this library.
-See `Optimize API <https://optimize.vicbee.net>`_ for a complete
+See `Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ for a complete
 API documentation.
 
 .. toctree::

@@ -84,7 +84,7 @@ vector of expected returns `r`.
 Learn more
 ----------
 
-- See `Optimize API <https://optimize.vicbee.net>`_ for a complete API documentation.
+- See `Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ for a complete API documentation.
 - Checkout `vicbee.net <https://vicbee.net>`_ and run the following jupiter notebook
 
     .. image:: https://mybinder.org/badge_logo.svg
