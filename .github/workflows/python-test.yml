@@ -1,6 +1,8 @@
 name: Test Python package
 
 on: [push]
+concurrency:
+  group: testing-one-by-one
 
 jobs:
   build:
