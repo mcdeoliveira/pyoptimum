@@ -17,18 +17,28 @@ class Client:
     Client object to facilitate connection to the
     `optimize.vicbee.net <https:optimize.vicbee.net>`_ optimization api
 
+    Calls will be made to a URL of the form:
+
+    ``base_url/api/prefix/entry_point``
+
+    in which ``entry_point`` is set in :meth:`pyoptimum.Client.call`.
+
     :param username: the username
     :param password: the password
     :param token: an authentication token
     :param auto_token_renewal: whether to automatically renew an expired token
     :param base_url: the api base url
+    :param api: the target api
+    :param prefix: the target api prefix
     """
 
     def __init__(self,
                  username: Optional[str] = None, password: Optional[str] = None,
                  token: Optional[str] = None,
                  auto_token_renewal: Optional[bool] = True,
-                 base_url: Optional[str] = 'https://optimize.vicbee.net/api'):
+                 base_url: Optional[str] = 'https://optimize.vicbee.net',
+                 api: Optional[str] = 'optimize',
+                 prefix: Optional[str] = 'api'):
 
         # username and password
         self.username = username
@@ -49,7 +59,8 @@ class Client:
         # make sure base_url does not have trailing /
         while self.base_url[-1] == '/':
             self.base_url = self.base_url[:-1]
-
+        # add api prefix
+        self.base_url = f'{self.base_url}/{api}/{prefix}'
 
         # initialize detail
         self.detail = None
@@ -67,7 +78,7 @@ class Client:
             'Authorization': 'Basic ' + basic
         }
 
-        response = requests.get(self.base_url + '/get_token', headers=headers)
+        response = requests.get(f'{self.base_url}/get_token', headers=headers)
         self.detail = None
 
         if response.ok:
@@ -94,13 +105,17 @@ class Client:
             # try renewing token
             self.get_token()
 
+        # make sure entry point does not start with a slash
+        while entry_point and entry_point[0] == '/':
+            entry_point = entry_point[1:]
+
         # See https://github.com/psf/requests/issues/6014
         headers = {
             'Content-type': 'application/json',
             'Accept': 'application/json',
             'X-Api-Key': self.token
         }
-        response = requests.post(self.base_url + '/' + entry_point,
+        response = requests.post(f'{self.base_url}/{entry_point}',
                                  data=json.dumps(data),
                                  headers=headers)
 

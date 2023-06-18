@@ -1,4 +1,5 @@
 import unittest
+import os
 
 import requests
 import math
@@ -7,12 +8,32 @@ from src import pyoptimum
 
 username = 'demo@optimize.vicbee.net'
 password = 'optimize'
+base_url = os.getenv('TEST_BASE_URL', 'https://optimize.vicbee.net')
 
 class TestBasic(unittest.TestCase):
 
-    def test_client(self):
+    def test_constructor(self):
 
         client = pyoptimum.Client(username=username, password=password)
+        self.assertIsNone(client.token)
+
+        client = pyoptimum.Client(token='token')
+        self.assertIsNone(client.username)
+        self.assertIsNone(client.password)
+
+        self.assertRaises(pyoptimum.PyOptimumException,
+                          pyoptimum.Client, username=username)
+
+        self.assertRaises(pyoptimum.PyOptimumException,
+                          pyoptimum.Client, username=password)
+
+        self.assertRaises(pyoptimum.PyOptimumException,
+                          pyoptimum.Client, token='')
+
+    def test_optimize(self):
+
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url)
 
         self.assertIsNone(client.token)
         client.get_token()
@@ -33,9 +54,19 @@ class TestBasic(unittest.TestCase):
         self.assertRaises(pyoptimum.PyOptimumException, pyoptimum.Client,
                           token='')
 
+    def test_models(self):
+
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url, api='models')
+
+        self.assertIsNone(client.token)
+        client.get_token()
+        self.assertIsNotNone(client.token)
+
     def test_portfolio(self):
 
-        client = pyoptimum.Client(username=username, password=password)
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url)
 
         s1 = 0.06
         s2 = 0.03
@@ -60,13 +91,21 @@ class TestBasic(unittest.TestCase):
 
         self.assertIsNone(client.detail)
 
+        # call with slash
+        response = client.call('/portfolio', data)
+
+        obj = response.get('obj')
+        self.assertTrue(math.fabs(math.sqrt(obj) - .045) < 1e-5)
+
         # call with errors
         data['r'] = [.14, .08, 0]
         self.assertRaises(pyoptimum.PyOptimumException, client.call, 'portfolio', data)
         self.assertIn('must be an array', client.detail)
+
     def test_forbidden(self):
 
-        client = pyoptimum.Client(username=username, password=password)
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url)
 
         data = {
             'A': [[2]],
