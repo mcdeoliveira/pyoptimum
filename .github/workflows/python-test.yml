@@ -3,14 +3,13 @@ name: Test Python package
 on: [push]
 
 jobs:
-  concurrency:
-    group: testing-one-by-one
-
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
+    concurrency:
+      group: testing-one-by-one
 
     steps:
       - uses: actions/checkout@v3
