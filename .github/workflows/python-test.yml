@@ -1,12 +1,12 @@
 name: Test Python package
 
 on: [push]
-concurrency:
-  group: testing-one-by-one
 
 jobs:
-  build:
+  concurrency:
+    group: testing-one-by-one
 
+  build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
