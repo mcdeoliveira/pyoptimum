@@ -110,3 +110,10 @@ venv.bak/
 doc/_build
 doc/_static
 doc/_templates
+
+dist/
+pyodide-dist/
+pyodide-*.tar.bz2
+
+venv_wsl/
+
