@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from typing import Optional, Iterable, Literal, Any
+from typing import Optional, Iterable, Literal, Any, Union
 
 import numpy as np
 import pandas as pd
@@ -122,7 +122,7 @@ class Portfolio:
         """
         return self.portfolio.index.tolist()
 
-    def import_csv(self, filepath: str|bytes|io.BytesIO|Path) -> None:
+    def import_csv(self, filepath: Union[str,bytes,io.BytesIO,Path]) -> None:
         """
         Import portfolio from csv file
 
@@ -180,7 +180,7 @@ class Portfolio:
 
     async def retrieve_models(self,
                               market_tickers: list[str],
-                              ranges: str | list[str],
+                              ranges: Union[str, list[str]],
                               return_model: ReturnModelLiteral = 'median',
                               common_factors: bool = True,
                               model_weights: dict[str, float] = None) -> None:
@@ -475,7 +475,7 @@ class Portfolio:
     def apply_constraint(self, tickers: list[str],
                          function: ConstraintFunctionLiteral,
                          sign: ConstraintSignLiteral,
-                         value: list[float]|float,
+                         value: Union[list[float], float],
                          unit: ConstraintUnitLiteral,
                          short_sales: bool=True, buy: bool=True, sell: bool=True) -> None:
         """
