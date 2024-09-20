@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from typing import Optional, Iterable, Literal, Any, Union, List, Tuple
+from typing import Optional, Iterable, Literal, Any, Union, List, Tuple, Dict
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,7 @@ class Portfolio:
         self.portfolio_client = portfolio_client
         self.model_client = model_client
         self.models: dict = {}
-        self.model_weights: dict[str, float] = {}
+        self.model_weights: Dict[str, float] = {}
         self.portfolio = None
         self.frontier = None
         self.frontier_query_params = {}
@@ -183,7 +183,7 @@ class Portfolio:
                               ranges: Union[str, List[str]],
                               return_model: ReturnModelLiteral = 'median',
                               common_factors: bool = True,
-                              model_weights: dict[str, float] = None) -> None:
+                              model_weights: Dict[str, float] = None) -> None:
         """
         Retrieve the portfolio models based on market tickers
 
@@ -311,7 +311,7 @@ class Portfolio:
                 if recs['status'] == 'optimal' \
                 else await self.retrieve_recommendation(mu, method='approximate')
 
-    def set_models_weights(self, model_weights: dict[str, float]) -> None:
+    def set_models_weights(self, model_weights: Dict[str, float]) -> None:
         """
         Set weights for the current portfolio models
 
