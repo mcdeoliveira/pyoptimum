@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from typing import Optional, Iterable, Literal, Any, Union
+from typing import Optional, Iterable, Literal, Any, Union, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ class Portfolio:
         return a, mu_star, sigma_0
 
     @staticmethod
-    def return_and_variance(x: npt.NDArray, model: Model) -> tuple[float, float]:
+    def return_and_variance(x: npt.NDArray, model: Model) -> Tuple[float, float]:
         # normalize for calculating return and standard deviation
         value = sum(x)
         mu = np.dot(x, model.r) / value
@@ -116,7 +116,7 @@ class Portfolio:
                        for attr in ['r', 'D', 'F', 'Q']})
         return model
 
-    def get_tickers(self) -> list[str]:
+    def get_tickers(self) -> List[str]:
         """
         :return: the portfolio tickers
         """
@@ -179,8 +179,8 @@ class Portfolio:
         return value
 
     async def retrieve_models(self,
-                              market_tickers: list[str],
-                              ranges: Union[str, list[str]],
+                              market_tickers: List[str],
+                              ranges: Union[str, List[str]],
                               return_model: ReturnModelLiteral = 'median',
                               common_factors: bool = True,
                               model_weights: dict[str, float] = None) -> None:
@@ -415,7 +415,7 @@ class Portfolio:
         std_range = self.frontier['std'].iloc[0], self.frontier['std'].iloc[-1]
         return mu_range, std_range
 
-    def get_range(self) -> tuple[list[float], list[float]]:
+    def get_range(self) -> Tuple[List[float], List[float]]:
         """
         :return: the range of the current model
         """
@@ -432,7 +432,7 @@ class Portfolio:
 
         return mu_range, std_range
 
-    def get_return_and_variance(self) -> tuple[float, float]:
+    def get_return_and_variance(self) -> Tuple[float, float]:
         """
         :return: the return and variance of the current portfolio
         """
@@ -445,7 +445,7 @@ class Portfolio:
         return Portfolio.unconstrained_frontier(self.get_model(), x_bar)
 
     @staticmethod
-    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> Tuple[Optional[pd.Series], Optional[pd.Series]]:
         index = df[column].searchsorted(value)
         n = df.shape[0]
         if index == n:
@@ -458,7 +458,7 @@ class Portfolio:
             # interpolate
             return df.iloc[index - 1], df.iloc[index]
 
-    def remove_constraints(self, tickers: list[str]) -> None:
+    def remove_constraints(self, tickers: List[str]) -> None:
         """
         Remove all individual constraints on the listed tickers
 
@@ -472,10 +472,10 @@ class Portfolio:
         self.portfolio.loc[tickers, 'lower'] = -np.inf
         self.portfolio.loc[tickers, 'upper'] = np.inf
 
-    def apply_constraint(self, tickers: list[str],
+    def apply_constraint(self, tickers: List[str],
                          function: ConstraintFunctionLiteral,
                          sign: ConstraintSignLiteral,
-                         value: Union[list[float], float],
+                         value: Union[List[float], float],
                          unit: ConstraintUnitLiteral,
                          short_sales: bool=True, buy: bool=True, sell: bool=True) -> None:
         """
