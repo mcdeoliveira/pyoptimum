@@ -1,10 +1,13 @@
 import io
+from pathlib import Path
 from typing import Optional, Iterable, Literal, Any
 
 import numpy as np
 import pandas as pd
 
 from numpy import typing as npt
+
+from pyoptimum import AsyncClient
 
 
 class Model:
@@ -29,12 +32,14 @@ GREATER_THAN_OR_EQUAL = "\u2265"
 
 class Portfolio:
 
+    ReturnModelLiteral = Literal['median', 'mean']
+
     MethodLiteral = Literal['approximate', 'optimal', 'none']
     ConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales']
     ConstraintSignLiteral = Literal[LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL]
     ConstraintUnitLiteral = Literal['shares', 'value', 'percent value']
 
-    def __init__(self, portfolio_client, model_client):
+    def __init__(self, portfolio_client: AsyncClient, model_client: AsyncClient):
         self.portfolio_client = portfolio_client
         self.model_client = model_client
         self.models: dict = {}
@@ -68,7 +73,56 @@ class Portfolio:
         std = np.sqrt(np.dot(model.Q * x, x) + np.dot(model.D @ v, v)) / value
         return mu, std
 
-    def import_csv(self, filepath: str|bytes|io.BytesIO) -> None:
+    def invalidate_model(self):
+        """
+        Invalidate the current portfolio models
+        """
+        self.models = {}
+        self.model_weights = {}
+
+    def invalidate_frontier(self):
+        """
+        Invalidate the current frontier
+        """
+        self.frontier = None
+        self.frontier_query_params = {}
+        self.frontier_method = 'none'
+
+    def has_prices(self) -> bool:
+        """
+        :return: True if prices have been retrieved
+        """
+        return self.portfolio is not None and 'close ($)' in self.portfolio
+
+    def has_frontier(self) -> bool:
+        """
+        :return: True if a frontier is available
+        """
+        return self.frontier is not None
+
+    def has_models(self) -> bool:
+        """
+        :return: True if models have been retrieved
+        """
+        return bool(self.models)
+
+    def get_model(self) -> Model:
+        """
+        :return: the portfolio model for the current model and weights
+        """
+        assert self.has_models(), "Models have not yet been retrieved"
+        model = Model({attr: sum([weight * getattr(self.models[rg], attr)
+                                  for rg, weight in self.model_weights.items()])
+                       for attr in ['r', 'D', 'F', 'Q']})
+        return model
+
+    def get_tickers(self) -> list[str]:
+        """
+        :return: the portfolio tickers
+        """
+        return self.portfolio.index.tolist()
+
+    def import_csv(self, filepath: str|bytes|io.BytesIO|Path) -> None:
         """
         Import portfolio from csv file
 
@@ -77,13 +131,16 @@ class Portfolio:
         # read csv
         portfolio = pd.read_csv(filepath)
 
+        # sanitize column names
+        portfolio.columns = [c.strip() for c in portfolio.columns]
+
         # set ticker as index
         assert 'ticker' in portfolio.columns, "Portfolio must contain a column " \
                                               "named 'ticker'"
         portfolio.set_index('ticker', inplace=True)
 
         # initialize shares
-        if 'shares' not in portfolio:
+        if 'shares' not in portfolio.columns:
             portfolio['shares'] = 0.0
 
         # initialize lower and upper
@@ -97,7 +154,7 @@ class Portfolio:
         # remove all other columns and set portfolio
         self.portfolio = portfolio[['shares', 'lower', 'upper']]
 
-    def retrieve_prices(self) -> float:
+    async def retrieve_prices(self) -> float:
         """
         Retrieve the prices of the portfolio
 
@@ -105,52 +162,37 @@ class Portfolio:
         """
 
         # retrieve prices
-        data = { 'symbols': self.portfolio.index.tolist() }
-        prices = self.model_client.call('prices', data)
+        data = {'symbols': self.portfolio.index.tolist()}
+        prices = await self.model_client.call('prices', data)
+
+        # add prices to dataframe
         prices = pd.DataFrame.from_dict(prices, orient='index',
                                         columns=['timestamp', 'close'])
 
-        # update portfolio value
+        # update portfolio value and weights
         self.portfolio['close ($)'] = prices['close']
-        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio['close ($)']
+        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio[
+            'close ($)']
         value = sum(self.portfolio['value ($)'])
         self.portfolio['value (%)'] = self.portfolio['value ($)'] / value
 
         return value
 
-    def set_models_weights(self, model_weights: dict[str, float]):
+    async def retrieve_models(self,
+                              market_tickers: list[str],
+                              ranges: str | list[str],
+                              return_model: ReturnModelLiteral = 'median',
+                              common_factors: bool = True,
+                              model_weights: dict[str, float] = None) -> None:
+        """
+        Retrieve the portfolio models based on market tickers
 
-        # range checking
-        assert self.models.keys() == model_weights.keys(), ("Weights must have the same "
-                                                            "keys as models")
-
-        assert all(value >= 0 for value in model_weights.values()), ("Weights must be "
-                                                                     "non-negative")
-
-        # normalize
-        sum_model_weights = sum(model_weights.values())
-        if sum_model_weights > 0:
-            self.model_weights = {rg: value/sum_model_weights for rg, value in
-                                  model_weights.items()}
-        else:
-            self.model_weights = {rg: 1/len(model_weights) for rg in
-                                  model_weights.keys()}
-
-        # update frontier
-        if self.frontier is not None:
-            model = self.get_model()
-            mu_std = (self.frontier['x']
-                      .apply(lambda x: pd.Series(Portfolio.return_and_variance(x, model),
-                                                 index=['mu', 'std'])))
-            self.frontier[['mu', 'std']] = mu_std
-            self.frontier_method = 'approximate'
-
-    def retrieve_models(self,
-                        market_tickers: list[str],
-                        ranges: str | list[str],
-                        return_model: str = 'median',
-                        common_factors: bool = True,
-                        model_weights: dict[str, float]=None) -> None:
+        :param market_tickers: the market tickers
+        :param ranges: the ranges to retrieve the portfolio models
+        :param return_model: the type of return model
+        :param common_factors: whether to keep factors common
+        :param model_weights: the model weights
+        """
 
         # retrieve models
         data = {
@@ -162,8 +204,10 @@ class Portfolio:
                 'return_model': return_model
             }
         }
-        model = self.model_client.call('model', data)
-        self.models = { rg: Model(data) for rg, data in model.items() }
+        model = await self.model_client.call('model', data)
+
+        # add models
+        self.models = {rg: Model(data) for rg, data in model.items()}
 
         # set model weights
         model_weights = model_weights or {rg: 1.0 for rg in model.keys()}
@@ -172,149 +216,51 @@ class Portfolio:
         # reinitialize frontier
         self.invalidate_frontier()
 
-    def _get_portfolio_query(self,
-                             cashflow: float, max_sales: float,
-                             short_sales: bool, buy: bool, sell: bool) -> dict:
+    async def retrieve_frontier(self,
+                                cashflow: float, max_sales: float,
+                                short_sales: bool, buy: bool, sell: bool) -> None:
+        """
+        Retrieve the portfolio frontier
 
-        # get model data
-        model = self.get_model()
-        data = model.to_dict(('r', 'Q', 'D', 'F'), as_list=True)
+        :param cashflow: the cashflow
+        :param max_sales: the max sales
+        :param short_sales: whether to allow short sales
+        :param buy: whether to allow buys
+        :param sell: whether to allow sells
+        """
 
-        # get portfolio data
-        value0 = self.portfolio['value ($)'].sum()
-        value = value0 + cashflow
-        x0 = self.portfolio['value (%)']
-        data['x0'] = x0.tolist()
+        # assert models and prices are defined
+        assert self.has_prices() and self.has_models(),\
+            "Either prices or models are missing"
 
-        # add cashflow and constraints
-        data['cashflow'] = cashflow / value0
-        data['options'] = {
-            'short': short_sales,
-            'buy': buy,
-            'sell': sell
-        }
-        data['constraints'] = [
-            {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
-
-        # has lower bound
-        if np.isfinite(self.portfolio['lower']).any():
-            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / value
-            data['xlo'] = xlo.tolist()
-
-        # has upper bound
-        if np.isfinite(self.portfolio['upper']).any():
-            # has lower bound
-            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
-            data['xup'] = xup.tolist()
-
-        return data
-
-    def invalidate_model(self):
-        self.models = {}
-        self.model_weights = {}
-
-    def invalidate_frontier(self):
-        self.frontier = None
-        self.frontier_query_params = {}
-        self.frontier_method = 'none'
-
-    def retrieve_frontier(self,
-                          cashflow: float, max_sales: float,
-                          short_sales: bool, buy: bool, sell: bool):
-
+        # retrieve frontier
         query = self._get_portfolio_query(cashflow, max_sales,
                                           short_sales, buy, sell)
-        sol = self.portfolio_client.call('frontier', query)
+        sol = await self.portfolio_client.call('frontier', query)
+
         if len(sol['frontier']) == 0:
+            self.invalidate_frontier()
             raise ValueError('Could not calculate optimal frontier; constraints likely make the problem infeasible.')
         frontier = pd.DataFrame(
             [(s['mu'], np.sqrt(s['sol']['obj']), np.array(s['sol']['x'])) for s in sol['frontier'] if
              s['sol']['status'] == 'optimal'], columns=['mu', 'std', 'x'])
         self.frontier = frontier
+
         # save query params
         self.frontier_query_params = query
         self.frontier_method = 'optimal'
 
-    def has_frontier(self) -> bool:
-        return self.frontier is not None
+    async def retrieve_recommendation(self, mu: Optional[float]=None,
+                                      method: MethodLiteral = 'approximate') -> dict:
+        """
+        Retrieve or calculate recommendations
 
-    def has_models(self) -> bool:
-        return bool(self.models)
+        :param mu: the expected return
+        :param method: whether to calculate approximate recommendations or retrieve from API
+        :return:
+        """
 
-    def get_model(self) -> Model:
-        model = Model({attr: sum([weight * getattr(self.models[rg], attr)
-                                  for rg, weight in self.model_weights.items()])
-                       for attr in ['r', 'D', 'F', 'Q']})
-        return model
-
-    def get_tickers(self) -> list[str]:
-
-        return self.portfolio.index.tolist()
-
-    def get_portfolio_dataframe(self):
-
-        # copy portfolio
-        portfolio_df = self.portfolio.copy()
-
-        if self.models:
-
-            # add return
-            model = self.get_model()
-            portfolio_df['return (%)'] = model.r.copy()
-            portfolio_df['std (%)'] = model.std.copy()
-            # portfolio_df['trade'] = ['Y' if s and b else 'S' if s else 'B' if b else 'N'
-            #                          for s, b in zip(portfolio_df['sell'], portfolio_df['buy'])]
-            # portfolio_df.drop(columns=['sell', 'buy'], inplace=True)
-            portfolio_df['lower ($)'] = portfolio_df['close ($)'] * portfolio_df['lower']
-            portfolio_df['upper ($)'] = portfolio_df['close ($)'] * portfolio_df['upper']
-
-        return portfolio_df
-
-    def get_frontier_range(self):
-        if self.frontier is None:
-            raise ValueError('Frontier has not been retrieved yet')
-        mu_range = self.frontier['mu'].iloc[0], self.frontier['mu'].iloc[-1]
-        std_range = self.frontier['std'].iloc[0], self.frontier['std'].iloc[-1]
-        return mu_range, std_range
-
-    def get_range(self) -> tuple[list[float], list[float]]:
-
-        model = self.get_model()
-        mu_range = [model.r.min(), model.r.max()]
-        std_range = [model.std.min(), model.std.max()]
-
-        if self.frontier is not None:
-            # account for frontier
-            fmu_range, fstd_range = self.get_frontier_range()
-            mu_range = min(mu_range[0], fmu_range[0]), max(mu_range[1], fmu_range[1])
-            std_range = min(std_range[0], fstd_range[0]), max(std_range[1], fstd_range[1])
-
-        return mu_range, std_range
-
-    def get_return_and_variance(self) -> tuple[float, float]:
-        return Portfolio.return_and_variance(self.portfolio['value (%)'], self.get_model())
-
-    def get_unconstrained_frontier(self, x_bar: float=1.):
-        return Portfolio.unconstrained_frontier(self.get_model(), x_bar)
-
-    @staticmethod
-    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
-        index = df[column].searchsorted(value)
-        n = df.shape[0]
-        if index == n:
-            # got the last element
-            return df.iloc[-1], None
-        elif index == 0:
-            # got the first element
-            return None, df.iloc[0]
-        else:
-            # interpolate
-            return df.iloc[index - 1], df.iloc[index]
-
-    def get_recommendation(self, mu: Optional[float]=None,
-                           method: MethodLiteral = 'approximate'):
-        if self.frontier is None:
-            return None
+        assert self.has_frontier(), "Frontier has not been retrieved"
 
         if mu is None:
             # locate std
@@ -353,16 +299,164 @@ class Portfolio:
                 std = (1 - eta) * left['std'] + eta * right['std']
 
             return {'x': x, 'status': 'optimal', 'std': std, 'mu': mu}
+
         elif method == 'exact':
             # exact recommendation
             data = self.frontier_query_params.copy()
             data['mu'] = mu
 
-            recs = self.portfolio_client.call('portfolio', data)
+            recs = await self.portfolio_client.call('portfolio', data)
             # return approximate if optimization failed
             return {'x': np.array(recs['x']), 'status': recs['status'], 'std': np.sqrt(recs['obj']), 'mu': mu} \
                 if recs['status'] == 'optimal' \
-                else self.get_recommendation(mu, method='approximate')
+                else await self.retrieve_recommendation(mu, method='approximate')
+
+    def set_models_weights(self, model_weights: dict[str, float]) -> None:
+        """
+        Set weights for the current portfolio models
+
+        :param model_weights: the model weights
+        """
+
+        # range checking
+        assert self.has_models(), "Models have not yet been retrieved"
+
+        assert self.models.keys() == model_weights.keys(), ("Weights must have the same "
+                                                            "keys as models")
+
+        assert all(value >= 0 for value in model_weights.values()), ("Weights must be "
+                                                                     "non-negative")
+
+        # normalize weights
+        sum_model_weights = sum(model_weights.values())
+        if sum_model_weights > 0:
+            self.model_weights = {rg: value/sum_model_weights for rg, value in
+                                  model_weights.items()}
+        else:
+            self.model_weights = {rg: 1/len(model_weights) for rg in
+                                  model_weights.keys()}
+
+        # update frontier
+        if self.has_frontier():
+            model = self.get_model()
+            mu_std = (self.frontier['x']
+                      .apply(lambda x: pd.Series(Portfolio.return_and_variance(x, model),
+                                                 index=['mu', 'std'])))
+            self.frontier[['mu', 'std']] = mu_std
+            self.frontier_method = 'approximate'
+
+
+    def _get_portfolio_query(self,
+                             cashflow: float, max_sales: float,
+                             short_sales: bool, buy: bool, sell: bool) -> dict:
+
+        # get model data
+        model = self.get_model()
+        data = model.to_dict(('r', 'Q', 'D', 'F'), as_list=True)
+
+        # get portfolio data
+        value0 = self.portfolio['value ($)'].sum()
+        value = value0 + cashflow
+        x0 = self.portfolio['value (%)']
+        data['x0'] = x0.tolist()
+
+        # add cashflow and constraints
+        data['cashflow'] = cashflow / value0
+        data['options'] = {
+            'short': short_sales,
+            'buy': buy,
+            'sell': sell
+        }
+        data['constraints'] = [
+            {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
+
+        # has lower bound
+        if np.isfinite(self.portfolio['lower']).any():
+            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / value
+            data['xlo'] = xlo.tolist()
+
+        # has upper bound
+        if np.isfinite(self.portfolio['upper']).any():
+            # has lower bound
+            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
+            data['xup'] = xup.tolist()
+
+        return data
+
+
+    def get_portfolio_dataframe(self):
+        """
+        :return: the portfolio as a dataframe
+        """
+
+        # copy portfolio
+        portfolio_df = self.portfolio.copy()
+
+        if self.has_models():
+            # add return
+            model = self.get_model()
+            portfolio_df['return (%)'] = model.r.copy()
+            portfolio_df['std (%)'] = model.std.copy()
+
+        if self.has_prices():
+            # add lower and upper bounds in value
+            portfolio_df['lower ($)'] = portfolio_df['close ($)'] * portfolio_df['lower']
+            portfolio_df['upper ($)'] = portfolio_df['close ($)'] * portfolio_df['upper']
+
+        return portfolio_df
+
+    def get_frontier_range(self):
+        """
+        :return: the range of frontier values
+        """
+        if self.frontier is None:
+            raise ValueError('Frontier has not been retrieved yet')
+        mu_range = self.frontier['mu'].iloc[0], self.frontier['mu'].iloc[-1]
+        std_range = self.frontier['std'].iloc[0], self.frontier['std'].iloc[-1]
+        return mu_range, std_range
+
+    def get_range(self) -> tuple[list[float], list[float]]:
+        """
+        :return: the range of the current model
+        """
+
+        model = self.get_model()
+        mu_range = [model.r.min(), model.r.max()]
+        std_range = [model.std.min(), model.std.max()]
+
+        if self.frontier is not None:
+            # account for frontier
+            fmu_range, fstd_range = self.get_frontier_range()
+            mu_range = min(mu_range[0], fmu_range[0]), max(mu_range[1], fmu_range[1])
+            std_range = min(std_range[0], fstd_range[0]), max(std_range[1], fstd_range[1])
+
+        return mu_range, std_range
+
+    def get_return_and_variance(self) -> tuple[float, float]:
+        """
+        :return: the return and variance of the current portfolio
+        """
+        return Portfolio.return_and_variance(self.portfolio['value (%)'], self.get_model())
+
+    def get_unconstrained_frontier(self, x_bar: float=1.):
+        """
+        :return: the unconstrained frontier parameters
+        """
+        return Portfolio.unconstrained_frontier(self.get_model(), x_bar)
+
+    @staticmethod
+    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+        index = df[column].searchsorted(value)
+        n = df.shape[0]
+        if index == n:
+            # got the last element
+            return df.iloc[-1], None
+        elif index == 0:
+            # got the first element
+            return None, df.iloc[0]
+        else:
+            # interpolate
+            return df.iloc[index - 1], df.iloc[index]
 
     def remove_constraints(self, tickers: list[str]) -> None:
         """

@@ -7,13 +7,15 @@ Welcome to PyOptimum's documentation!
 =====================================
 
 This package contains some utility functions to facilitate the connection to the
-`Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ in python. See
+`Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ and
+`Models API <https://optimize.vicbee.net/models/api/ui>`_ in python. See
 `demo <https://vicbee.net/optimize.html>`_ for a more interesting jupyter
 notebook demo.
 
 This library is a simple wrapper of the
-`requests <https://requests.readthedocs.io>`_
-python library that helps making token management transparent to the user.
+`requests <https://requests.readthedocs.io>`_ and
+`aiohttp <https://aiohttp.readthedocs.io>`_
+python libraries that helps making token management transparent to the user.
 
 Documentation is limited to the functionality provided by this library.
 See `Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ for a complete

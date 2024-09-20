@@ -169,7 +169,6 @@ class AsyncClient(Client):
         self.detail = None
         async with ClientSession() as session:
             async with session.get(f'{self.base_url}/get_token', headers=headers, raise_for_status=True) as resp:
-                print(resp)
                 if resp.status < 400:
                     response = await resp.json()
                     self.token = response.get('token')
