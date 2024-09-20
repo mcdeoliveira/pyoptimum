@@ -25,7 +25,9 @@ classifiers = [
 dependencies = [
     "requests",
     "aiohttp",
-    "typing-extensions"
+    "typing-extensions",
+    "numpy",
+    "pandas"
 ]
 
 [project.urls]
