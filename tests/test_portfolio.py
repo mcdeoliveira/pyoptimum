@@ -2,8 +2,6 @@ import unittest
 import os
 
 import numpy as np
-import pandas as pd
-from pandas.core.methods.describe import select_describe_func
 
 username = 'demo@optimize.vicbee.net'
 password = 'optimize'
