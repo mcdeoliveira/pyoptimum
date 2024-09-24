@@ -243,9 +243,19 @@ class Portfolio:
         if len(sol['frontier']) == 0:
             self.invalidate_frontier()
             raise ValueError('Could not calculate optimal frontier; constraints likely make the problem infeasible.')
-        frontier = pd.DataFrame(
-            [(s['mu'], np.sqrt(s['sol']['obj']), np.array(s['sol']['x'])) for s in sol['frontier'] if
-             s['sol']['status'] == 'optimal'], columns=['mu', 'std', 'x'])
+
+        # calculate variance
+        model = self.get_model()
+        values = []
+        for s in sol['frontier']:
+            if s['sol']['status'] == 'optimal':
+                mu = s['mu']
+                x = np.array(s['sol']['x'])
+                _, std = Portfolio.return_and_variance(x, model)
+                values.append((mu, std, x))
+
+        # assemble return dataframe
+        frontier = pd.DataFrame(values, columns=['mu', 'std', 'x'])
         self.frontier = frontier
 
         # save query params
@@ -308,10 +318,13 @@ class Portfolio:
             data['mu'] = mu
 
             recs = await self.portfolio_client.call('portfolio', data)
-            # return approximate if optimization failed
-            return {'x': np.array(recs['x']), 'status': recs['status'], 'std': np.sqrt(recs['obj']), 'mu': mu} \
-                if recs['status'] == 'optimal' \
-                else await self.retrieve_recommendation(mu, method='approximate')
+            if recs['status'] == 'optimal':
+                x = np.array(recs['x'])
+                _, std = Portfolio.return_and_variance(x, self.get_model())
+                return {'x': x, 'status': recs['status'], 'std': std, 'mu': mu}
+            else:
+                # return approximate if optimization failed
+                return await self.retrieve_recommendation(mu, method='approximate')
 
     def set_models_weights(self, model_weights: Dict[str, float]) -> None:
         """
@@ -441,7 +454,7 @@ class Portfolio:
 
     def get_return_and_variance(self) -> Tuple[float, float]:
         """
-        :return: the return and variance of the current portfolio
+        :return: the return and standard deviation of the current portfolio
         """
         return Portfolio.return_and_variance(self.portfolio['value (%)'], self.get_model())
 
