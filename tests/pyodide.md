@@ -9,11 +9,11 @@
 
 ## Install tests requirements and pytest-pyodide
 
-    pip install -r test/requirements.txt
+    pip install -r tests/requirements.txt
 
 ## Install pyodide
 
-Update the version and run the following snipet:
+Update the version and run the following snippet:
 
     wget https://github.com/pyodide/pyodide/releases/download/0.26.2/pyodide-core-0.26.2.tar.bz2
     tar xjf pyodide-core-0.26.2.tar.bz2

@@ -218,7 +218,8 @@ class Portfolio:
 
     async def retrieve_frontier(self,
                                 cashflow: float, max_sales: float,
-                                short_sales: bool, buy: bool, sell: bool) -> None:
+                                short_sales: bool, buy: bool, sell: bool,
+                                rho: float=0.0) -> None:
         """
         Retrieve the portfolio frontier
 
@@ -227,6 +228,7 @@ class Portfolio:
         :param short_sales: whether to allow short sales
         :param buy: whether to allow buys
         :param sell: whether to allow sells
+        :param rho: regularization factor
         """
 
         # assert models and prices are defined
@@ -235,7 +237,7 @@ class Portfolio:
 
         # retrieve frontier
         query = self._get_portfolio_query(cashflow, max_sales,
-                                          short_sales, buy, sell)
+                                          short_sales, buy, sell, rho)
         sol = await self.portfolio_client.call('frontier', query)
 
         if len(sol['frontier']) == 0:
@@ -348,7 +350,8 @@ class Portfolio:
 
     def _get_portfolio_query(self,
                              cashflow: float, max_sales: float,
-                             short_sales: bool, buy: bool, sell: bool) -> dict:
+                             short_sales: bool, buy: bool, sell: bool,
+                             rho: float=0.0) -> dict:
 
         # get model data
         model = self.get_model()
@@ -380,6 +383,10 @@ class Portfolio:
             # has lower bound
             xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
             data['xup'] = xup.tolist()
+
+        # has regularization
+        if rho > 0:
+            data['rho'] = rho
 
         return data
 
