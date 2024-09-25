@@ -1,4 +1,6 @@
 import base64
+import re
+from json import JSONDecodeError
 from typing import Optional, Any
 
 import json
@@ -31,6 +33,9 @@ class Client:
     :param prefix: the target api prefix
     """
 
+    SLASH_END = re.compile('/+$')
+    SLASH_START = re.compile('^/+')
+
     def __init__(self,
                  username: Optional[str] = None, password: Optional[str] = None,
                  token: Optional[str] = None,
@@ -54,15 +59,25 @@ class Client:
                                      "have not been provided.")
 
         # base url
-        self.base_url = base_url
-        # make sure base_url does not have trailing /
-        while self.base_url[-1] == '/':
-            self.base_url = self.base_url[:-1]
-        # add api prefix
-        self.base_url = f'{self.base_url}/{api}/{prefix}'
+        self.base_url = Client.url_join(base_url, api, prefix)
 
         # initialize detail
         self.detail = None
+
+    @staticmethod
+    def url_join(*args: str) -> str:
+        """
+        Sanitizes and join url parts
+
+        The main role of this function is to remove slashes at the beginning or end of url parts
+
+        :param args: the parts of the url
+        :return: the sanitized url
+        """
+        return '/'.join([x for x in
+                         [Client.SLASH_START.sub('',
+                                                 Client.SLASH_END.sub('', y))
+                          for y in args] if x])
 
     def get_token(self) -> None:
         """
@@ -78,11 +93,16 @@ class Client:
             'Authorization': 'Basic ' + basic
         }
 
-        response = get(f'{self.base_url}/get_token', headers=headers)
+        response = get(Client.url_join(self.base_url, 'get_token'), headers=headers)
         self.detail = None
 
         if response.ok:
-            self.token = response.json().get('token')
+            try:
+                self.token = response.json().get('token')
+            except (KeyError, JSONDecodeError) as e:
+                raise PyOptimumException(f"Error while retrieving token: Invalid token: {e}")
+            except Exception as e:
+                raise PyOptimumException(f"Error while retrieving token: {e}")
         else:
             response.raise_for_status()
 
@@ -104,24 +124,23 @@ class Client:
             # try renewing token
             self.get_token()
 
-        # make sure entry point does not start with a slash
-        while entry_point and entry_point[0] == '/':
-            entry_point = entry_point[1:]
-
         # See https://github.com/psf/requests/issues/6014
         headers = {
             'Content-type': 'application/json',
             'Accept': 'application/json',
             'X-Api-Key': self.token
         }
-        response = post(f'{self.base_url}/{entry_point}',
+        response = post(Client.url_join(self.base_url, entry_point),
                         data=json.dumps(data),
                         headers=headers)
 
         if response.ok:
 
-            self.detail = None
-            return response.json()
+            try:
+                self.detail = None
+                return response.json()
+            except JSONDecodeError as e:
+                raise PyOptimumException(f"Invalid response: {e}")
 
         else:
 
@@ -168,10 +187,14 @@ class AsyncClient(Client):
 
         self.detail = None
         async with ClientSession() as session:
-            async with session.get(f'{self.base_url}/get_token', headers=headers, raise_for_status=True) as resp:
+            async with session.get(Client.url_join(self.base_url, 'get_token'),
+                                   headers=headers, raise_for_status=True) as resp:
                 if resp.status < 400:
-                    response = await resp.json()
-                    self.token = response.get('token')
+                    try:
+                        response = await resp.json()
+                        self.token = response.get('token')
+                    except JSONDecodeError as e:
+                        raise PyOptimumException(f"Invalid response: {e}")
                 else:
                     resp.raise_for_status()
 
@@ -194,10 +217,6 @@ class AsyncClient(Client):
             # try renewing token
             await self.get_token()
 
-        # make sure entry point does not start with a slash
-        while entry_point and entry_point[0] == '/':
-            entry_point = entry_point[1:]
-
         # See https://github.com/psf/requests/issues/6014
         headers = {
             'Content-type': 'application/json',
@@ -205,13 +224,16 @@ class AsyncClient(Client):
             'X-Api-Key': self.token
         }
         async with ClientSession() as session:
-            async with session.post(f'{self.base_url}/{entry_point}',
+            async with session.post(Client.url_join(self.base_url, entry_point),
                                     data=json.dumps(data),
                                     headers=headers) as resp:
                 if resp.status < 400:
 
-                    self.detail = None
-                    return await resp.json()
+                    try:
+                        self.detail = None
+                        return await resp.json()
+                    except JSONDecodeError as e:
+                        raise PyOptimumException(f"Invalid response: {e}")
 
                 elif resp.status == 400:
                     content = json.loads(await resp.content.read())

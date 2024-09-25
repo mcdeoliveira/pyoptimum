@@ -30,6 +30,56 @@ class TestBasic(unittest.TestCase):
         self.assertRaises(pyoptimum.PyOptimumException,
                           pyoptimum.Client, token='')
 
+    def test_urls(self):
+
+        answer = 'a/b/c'
+        result = pyoptimum.Client.url_join('a', 'b', 'c')
+        self.assertEqual(result, answer)
+
+        answer = 'a/b/c'
+        result = pyoptimum.Client.url_join('a', '', 'b', '', 'c', '')
+        self.assertEqual(result, answer)
+
+        answer = 'a/b/c'
+        result = pyoptimum.Client.url_join('a/', '', '/b', '', 'c/', '')
+        self.assertEqual(result, answer)
+
+        answer = 'a/b/c'
+        result = pyoptimum.Client.url_join('//a//', '', '//b', '', 'c//', '')
+        self.assertEqual(result, answer)
+
+        answer = 'a:5000/b/c'
+        result = pyoptimum.Client.url_join('//a:5000', '', '//b', '', 'c//', '')
+        self.assertEqual(result, answer)
+
+        # remove trailing slashes
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url + '////')
+        self.assertIsNone(client.token)
+        client.get_token()
+        self.assertIsNotNone(client.token)
+
+        # remove trailing slashes
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url + '////', api='optimize', prefix='api')
+        self.assertIsNone(client.token)
+        client.get_token()
+        self.assertIsNotNone(client.token)
+
+        # remove trailing slashes but not in the middle
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url + '////', api='optimize/api', prefix='')
+        self.assertIsNone(client.token)
+        client.get_token()
+        self.assertIsNotNone(client.token)
+
+        # wrong url that is not json
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url, api='optimizeXY', prefix='api')
+        self.assertIsNone(client.token)
+        with self.assertRaises(pyoptimum.PyOptimumException):
+            client.get_token()
+
     def test_optimize(self):
 
         client = pyoptimum.Client(username=username, password=password,
