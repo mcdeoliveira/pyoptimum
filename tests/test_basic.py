@@ -113,6 +113,16 @@ class TestBasic(unittest.TestCase):
         client.get_token()
         self.assertIsNotNone(client.token)
 
+    def test_auth(self):
+
+        client = pyoptimum.Client(username=username, password=password,
+                                  base_url=base_url, api='models',
+                                  auth_url='https://optimize.vicbee.net/auth/api')
+
+        self.assertIsNone(client.token)
+        client.get_token()
+        self.assertIsNotNone(client.token)
+
     def test_portfolio(self):
 
         client = pyoptimum.Client(username=username, password=password,

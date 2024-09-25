@@ -31,6 +31,7 @@ class Client:
     :param base_url: the api base url
     :param api: the target api
     :param prefix: the target api prefix
+    :param auth_url: the api auth url (optional)
     """
 
     SLASH_END = re.compile('/+$')
@@ -39,10 +40,11 @@ class Client:
     def __init__(self,
                  username: Optional[str] = None, password: Optional[str] = None,
                  token: Optional[str] = None,
-                 auto_token_renewal: Optional[bool] = True,
-                 base_url: Optional[str] = 'https://optimize.vicbee.net',
-                 api: Optional[str] = 'optimize',
-                 prefix: Optional[str] = 'api'):
+                 auto_token_renewal: bool = True,
+                 base_url: str = 'https://optimize.vicbee.net',
+                 api: str = 'optimize',
+                 prefix: str = 'api',
+                 auth_url: str = ''):
 
         # username and password
         self.username = username
@@ -60,6 +62,9 @@ class Client:
 
         # base url
         self.base_url = Client.url_join(base_url, api, prefix)
+
+        # auth url
+        self.auth_url = auth_url or self.base_url
 
         # initialize detail
         self.detail = None
@@ -93,7 +98,7 @@ class Client:
             'Authorization': 'Basic ' + basic
         }
 
-        response = get(Client.url_join(self.base_url, 'get_token'), headers=headers)
+        response = get(Client.url_join(self.auth_url, 'get_token'), headers=headers)
         self.detail = None
 
         if response.ok:
@@ -169,6 +174,7 @@ class AsyncClient(Client):
     :param base_url: the api base url
     :param api: the target api
     :param prefix: the target api prefix
+    :param auth_url: the api auth url (optional)
     """
 
     async def get_token(self) -> None:
@@ -187,7 +193,7 @@ class AsyncClient(Client):
 
         self.detail = None
         async with ClientSession() as session:
-            async with session.get(Client.url_join(self.base_url, 'get_token'),
+            async with session.get(Client.url_join(self.auth_url, 'get_token'),
                                    headers=headers, raise_for_status=True) as resp:
                 if resp.status < 400:
                     try:
