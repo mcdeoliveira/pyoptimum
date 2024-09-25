@@ -49,6 +49,48 @@ class Portfolio:
         self.frontier_query_params = {}
         self.frontier_method: Portfolio.MethodLiteral = 'none'
 
+    def _get_portfolio_query(self,
+                             cashflow: float, max_sales: float,
+                             short_sales: bool, buy: bool, sell: bool,
+                             rho: float=0.0) -> dict:
+
+        # get model data
+        model = self.get_model()
+        data = model.to_dict(('r', 'Q', 'D', 'F'), as_list=True)
+
+        # get portfolio data
+        value0 = self.portfolio['value ($)'].sum()
+        value = value0 + cashflow
+        x0 = self.portfolio['value (%)']
+        data['x0'] = x0.tolist()
+
+        # add cashflow and constraints
+        data['cashflow'] = cashflow / value0
+        data['options'] = {
+            'short': short_sales,
+            'buy': buy,
+            'sell': sell
+        }
+        data['constraints'] = [
+            {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
+
+        # has lower bound
+        if np.isfinite(self.portfolio['lower']).any():
+            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / value
+            data['xlo'] = xlo.tolist()
+
+        # has upper bound
+        if np.isfinite(self.portfolio['upper']).any():
+            # has lower bound
+            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
+            data['xup'] = xup.tolist()
+
+        # has regularization
+        if rho > 0:
+            data['rho'] = rho
+
+        return data
+
     @staticmethod
     def unconstrained_frontier(model: Model, x_bar: float=1.):
         # TODO: improve calculation by using the lemma of the inverse instead of
@@ -121,6 +163,12 @@ class Portfolio:
         :return: the portfolio tickers
         """
         return self.portfolio.index.tolist()
+
+    def get_value(self) -> float:
+        try:
+            return sum(self.portfolio['value ($)'])
+        except (KeyError, TypeError):
+            return 0.0
 
     def import_csv(self, filepath: Union[str,bytes,io.BytesIO,Path]) -> None:
         """
@@ -360,48 +408,6 @@ class Portfolio:
             self.frontier[['mu', 'std']] = mu_std
             self.frontier_method = 'approximate'
 
-
-    def _get_portfolio_query(self,
-                             cashflow: float, max_sales: float,
-                             short_sales: bool, buy: bool, sell: bool,
-                             rho: float=0.0) -> dict:
-
-        # get model data
-        model = self.get_model()
-        data = model.to_dict(('r', 'Q', 'D', 'F'), as_list=True)
-
-        # get portfolio data
-        value0 = self.portfolio['value ($)'].sum()
-        value = value0 + cashflow
-        x0 = self.portfolio['value (%)']
-        data['x0'] = x0.tolist()
-
-        # add cashflow and constraints
-        data['cashflow'] = cashflow / value0
-        data['options'] = {
-            'short': short_sales,
-            'buy': buy,
-            'sell': sell
-        }
-        data['constraints'] = [
-            {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
-
-        # has lower bound
-        if np.isfinite(self.portfolio['lower']).any():
-            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / value
-            data['xlo'] = xlo.tolist()
-
-        # has upper bound
-        if np.isfinite(self.portfolio['upper']).any():
-            # has lower bound
-            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
-            data['xup'] = xup.tolist()
-
-        # has regularization
-        if rho > 0:
-            data['rho'] = rho
-
-        return data
 
 
     def get_portfolio_dataframe(self):

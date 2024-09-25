@@ -26,6 +26,8 @@ class TestBasic(unittest.TestCase):
         self.assertFalse(portfolio.has_models())
         self.assertFalse(portfolio.has_frontier())
 
+        self.assertEqual(portfolio.get_value(), 0.0)
+
         from pathlib import Path
         file = Path(__file__).parent / 'test.csv'
         portfolio.import_csv(file)
@@ -33,6 +35,7 @@ class TestBasic(unittest.TestCase):
         self.assertListEqual(portfolio.portfolio.index.tolist(),['AAPL', 'MSFT', 'ASML', 'TQQQ'])
         self.assertListEqual(portfolio.portfolio['shares'].tolist(), [1, 10, 0, 13])
 
+        self.assertEqual(portfolio.get_value(), 0.0)
 
 class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
@@ -50,10 +53,14 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
     async def test_prices(self):
 
+        self.assertEqual(self.portfolio.get_value(), 0.0)
+
         # retrieve prices
         self.assertFalse(self.portfolio.has_prices())
         await self.portfolio.retrieve_prices()
         self.assertTrue(self.portfolio.has_prices())
+
+        self.assertEqual(self.portfolio.get_value(), sum(self.portfolio.portfolio['value ($)']))
 
         self.assertIn('close ($)', self.portfolio.portfolio)
         self.assertIn('value ($)', self.portfolio.portfolio)
