@@ -202,16 +202,7 @@ class Portfolio:
         # remove all other columns and set portfolio
         self.portfolio = portfolio[['shares', 'lower', 'upper']]
 
-    async def retrieve_prices(self) -> float:
-        """
-        Retrieve the prices of the portfolio
-
-        :return: the total portfolio value
-        """
-
-        # retrieve prices
-        data = {'symbols': self.portfolio.index.tolist()}
-        prices = await self.model_client.call('prices', data)
+    def _update_prices(self, prices: dict) -> float:
 
         # add prices to dataframe
         prices = pd.DataFrame.from_dict(prices, orient='index',
@@ -226,11 +217,28 @@ class Portfolio:
 
         return value
 
+    async def retrieve_prices(self) -> float:
+        """
+        Retrieve the prices of the portfolio
+
+        :return: the total portfolio value
+        """
+
+        # retrieve prices
+        data = {'symbols': self.portfolio.index.tolist()}
+        prices = await self.model_client.call('prices', data)
+
+        # add prices to dataframe
+        value = self._update_prices(prices)
+
+        return value
+
     async def retrieve_models(self,
                               market_tickers: List[str],
                               ranges: Union[str, List[str]],
                               return_model: ReturnModelLiteral = 'median',
                               common_factors: bool = True,
+                              include_prices: bool = False,
                               model_weights: Dict[str, float] = None) -> None:
         """
         Retrieve the portfolio models based on market tickers
@@ -239,6 +247,7 @@ class Portfolio:
         :param ranges: the ranges to retrieve the portfolio models
         :param return_model: the type of return model
         :param common_factors: whether to keep factors common
+        :param include_prices: whether to include prices on results
         :param model_weights: the model weights
         """
 
@@ -249,10 +258,15 @@ class Portfolio:
             'range': ranges,
             'options': {
                 'common': common_factors,
-                'return_model': return_model
+                'return_model': return_model,
+                'include_prices': include_prices
             }
         }
         model = await self.model_client.call('model', data)
+
+        if include_prices:
+            # update prices
+            self._update_prices(model.pop('prices'))
 
         # add models
         self.models = {rg: Model(data) for rg, data in model.items()}

@@ -97,6 +97,32 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         model = self.portfolio.get_model()
         self.assertIsInstance(model, Model)
 
+    async def test_models_with_prices(self):
+
+        # try getting model before retrieving
+        with self.assertRaises(AssertionError):
+            self.portfolio.get_model()
+
+        with self.assertRaises(AssertionError):
+            self.portfolio.set_models_weights({})
+
+        # retrieve models
+        market_tickers = ['^DJI']
+        ranges = ['1mo', '6mo', '1y']
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+        await self.portfolio.retrieve_models(market_tickers, ranges, include_prices=True)
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+
+        await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        from pyoptimum.portfolio import Model
+
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
     async def test_frontier(self):
 
         # retrieve prices
