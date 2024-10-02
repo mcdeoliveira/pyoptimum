@@ -14,10 +14,53 @@ class Model:
 
     def __init__(self, data: dict):
         self.r = np.array(data['r'])
-        self.D = np.array(data['D'])
         self.F = np.array(data['F'])
         self.Q = np.array(data['Q'])
-        self.std = np.sqrt(self.Q + np.diag(self.F @ self.D @ self.F.transpose()))
+
+        self._std = None
+        self._Di = None
+        self._D = None
+        if 'Di' in data:
+            assert 'D' not in data, "Di and D cannot be both in model data"
+            self.Di = np.array(data['Di'])
+        else:
+            self.D = np.array(data['D'])
+
+    @property
+    def std(self):
+        if self._std is None:
+            self._std = np.sqrt(self.Q + np.diag(self.F @ self.D @ self.F.transpose()))
+        return self._std
+
+    @property
+    def D(self):
+        if self._D is None:
+            # calculate inverse first
+            D = np.linalg.inv(self.Di)
+            D = (D + D.T)/2
+            self._D = D
+        return self._D
+
+    @D.setter
+    def D(self, value: npt.NDArray):
+        self._D = value
+        self._Di = None
+        self._std = None
+
+    @property
+    def Di(self):
+        if self._Di is None:
+            # calculate inverse first
+            Di = np.linalg.inv(self.D)
+            Di = (Di + Di.T)/2
+            self._Di = Di
+        return self._Di
+
+    @Di.setter
+    def Di(self, value: npt.NDArray):
+        self._Di = value
+        self._D = None
+        self._std = None
 
     def to_dict(self, fields: Optional[Iterable]=None, as_list: bool=False) -> dict:
         if fields:
@@ -32,6 +75,7 @@ GREATER_THAN_OR_EQUAL = "\u2265"
 
 class Portfolio:
 
+    ModelMethodLiteral = Literal['linear', 'linear-fractional']
     ReturnModelLiteral = Literal['median', 'mean']
 
     MethodLiteral = Literal['approximate', 'optimal', 'none']
@@ -39,15 +83,48 @@ class Portfolio:
     ConstraintSignLiteral = Literal[LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL]
     ConstraintUnitLiteral = Literal['shares', 'value', 'percent value']
 
-    def __init__(self, portfolio_client: AsyncClient, model_client: AsyncClient):
+    def __init__(self,
+                 portfolio_client: AsyncClient,
+                 model_client: AsyncClient,
+                 model_method: ModelMethodLiteral = 'linear'):
         self.portfolio_client = portfolio_client
         self.model_client = model_client
+        self.model_method = model_method
         self.models: dict = {}
         self.model_weights: Dict[str, float] = {}
         self.portfolio = None
         self.frontier = None
         self.frontier_query_params = {}
         self.frontier_method: Portfolio.MethodLiteral = 'none'
+
+    @staticmethod
+    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> Tuple[Optional[pd.Series], Optional[pd.Series]]:
+        index = df[column].searchsorted(value)
+        n = df.shape[0]
+        if index == n:
+            # got the last element
+            return df.iloc[-1], None
+        elif index == 0:
+            # got the first element
+            return None, df.iloc[0]
+        else:
+            # interpolate
+            return df.iloc[index - 1], df.iloc[index]
+
+    def _update_prices(self, prices: dict) -> float:
+
+        # add prices to dataframe
+        prices = pd.DataFrame.from_dict(prices, orient='index',
+                                        columns=['timestamp', 'close'])
+
+        # update portfolio value and weights
+        self.portfolio['close ($)'] = prices['close']
+        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio[
+            'close ($)']
+        value = sum(self.portfolio['value ($)'])
+        self.portfolio['value (%)'] = self.portfolio['value ($)'] / value
+
+        return value
 
     def _get_portfolio_query(self,
                              cashflow: float, max_sales: float,
@@ -153,9 +230,18 @@ class Portfolio:
         :return: the portfolio model for the current model and weights
         """
         assert self.has_models(), "Models have not yet been retrieved"
-        model = Model({attr: sum([weight * getattr(self.models[rg], attr)
-                                  for rg, weight in self.model_weights.items()])
-                       for attr in ['r', 'D', 'F', 'Q']})
+
+        if self.model_method == 'linear' or len(self.models) == 1:
+            # linear model
+            model = Model({attr: sum([weight * getattr(self.models[rg], attr)
+                                      for rg, weight in self.model_weights.items()])
+                           for attr in ['r', 'D', 'F', 'Q']})
+        else:
+            # linear-fractional model
+            model = Model({attr: sum([weight * getattr(self.models[rg], attr)
+                                      for rg, weight in self.model_weights.items()])
+                           for attr in ['r', 'Di', 'F', 'Q']})
+
         return model
 
     def get_tickers(self) -> List[str]:
@@ -202,21 +288,6 @@ class Portfolio:
         # remove all other columns and set portfolio
         self.portfolio = portfolio[['shares', 'lower', 'upper']]
 
-    def _update_prices(self, prices: dict) -> float:
-
-        # add prices to dataframe
-        prices = pd.DataFrame.from_dict(prices, orient='index',
-                                        columns=['timestamp', 'close'])
-
-        # update portfolio value and weights
-        self.portfolio['close ($)'] = prices['close']
-        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio[
-            'close ($)']
-        value = sum(self.portfolio['value ($)'])
-        self.portfolio['value (%)'] = self.portfolio['value ($)'] / value
-
-        return value
-
     async def retrieve_prices(self) -> float:
         """
         Retrieve the prices of the portfolio
@@ -237,7 +308,7 @@ class Portfolio:
                               market_tickers: List[str],
                               ranges: Union[str, List[str]],
                               return_model: ReturnModelLiteral = 'median',
-                              common_factors: bool = True,
+                              common_factors: bool = False,
                               include_prices: bool = False,
                               model_weights: Dict[str, float] = None) -> None:
         """
@@ -422,7 +493,8 @@ class Portfolio:
             self.frontier[['mu', 'std']] = mu_std
             self.frontier_method = 'approximate'
 
-
+    def set_model_method(self, method: ModelMethodLiteral):
+        self.model_method = method
 
     def get_portfolio_dataframe(self):
         """
@@ -483,20 +555,6 @@ class Portfolio:
         :return: the unconstrained frontier parameters
         """
         return Portfolio.unconstrained_frontier(self.get_model(), x_bar)
-
-    @staticmethod
-    def _locate_value(value: Any, column: str, df: pd.DataFrame) -> Tuple[Optional[pd.Series], Optional[pd.Series]]:
-        index = df[column].searchsorted(value)
-        n = df.shape[0]
-        if index == n:
-            # got the last element
-            return df.iloc[-1], None
-        elif index == 0:
-            # got the first element
-            return None, df.iloc[0]
-        else:
-            # interpolate
-            return df.iloc[index - 1], df.iloc[index]
 
     def remove_constraints(self, tickers: List[str]) -> None:
         """

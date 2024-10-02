@@ -37,6 +37,132 @@ class TestBasic(unittest.TestCase):
 
         self.assertEqual(portfolio.get_value(), 0.0)
 
+
+class TestModel(unittest.TestCase):
+
+    def test_constructor_1(self):
+
+        from pyoptimum.portfolio import Model
+
+        data = {
+            'Q': np.random.normal(size=(5,)),
+            'F': np.random.normal(size=(5,3)),
+            'D': np.random.normal(size=(3,3)),
+            'r': np.random.normal(size=(5,))
+        }
+        data['Q'] = data['Q'].T @ data['Q']
+        data['D'] = data['D'].T @ data['D']
+
+        # data does not have Di
+        model = Model(data)
+        self.assertIsNone(model._Di)
+
+        # will calculate Di
+        di = model.Di
+        self.assertIsNotNone(model._Di)
+        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
+
+        # make sure it is cached
+        di2 = model.Di
+        self.assertIs(di, di2)
+
+        # will set D
+        D = np.random.normal(size=(3, 3))
+        D = D.T @ D
+        model.D = D
+        self.assertIsNone(model._Di)
+
+        # will calculate Di
+        di = model.Di
+        self.assertIsNotNone(model._Di)
+        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
+
+        # make sure it is cached
+        di2 = model.Di
+        self.assertIs(di, di2)
+
+        # will set Di
+        Di = np.random.normal(size=(3, 3))
+        Di = Di.T @ Di
+        model.Di = Di
+        self.assertIsNone(model._D)
+
+        # will calculate D
+        d = model.D
+        self.assertIsNotNone(model._D)
+        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
+
+        # make sure it is cached
+        d2 = model.D
+        self.assertIs(d, d2)
+
+        data = {
+            'Q': np.random.normal(size=(5,)),
+            'F': np.random.normal(size=(5,3)),
+            'Di': np.random.normal(size=(3,3)),
+            'r': np.random.normal(size=(5,))
+        }
+        data['Q'] = data['Q'].T @ data['Q']
+        data['Di'] = data['Di'].T @ data['Di']
+
+        # data does not have D
+        model = Model(data)
+        self.assertIsNone(model._D)
+
+        # will calculate D
+        d = model.D
+        self.assertIsNotNone(model._D)
+        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
+
+        # make sure it is cached
+        d2 = model.D
+        self.assertIs(d, d2)
+
+        # test std
+        self.assertIsNone(model._std)
+        s = model.std
+        self.assertIsNotNone(model._std)
+
+        # make sure it is cached
+        s2 = model.std
+        self.assertIs(s, s2)
+
+        data = {
+            'Q': np.random.normal(size=(5,)),
+            'F': np.random.normal(size=(5,3)),
+            'Di': np.random.normal(size=(3,3)),
+            'r': np.random.normal(size=(5,))
+        }
+        data['Q'] = data['Q'].T @ data['Q']
+        data['Di'] = data['Di'].T @ data['Di']
+
+        # data does not have D
+        model = Model(data)
+        self.assertIsNone(model._D)
+
+        # test std
+        self.assertIsNone(model._std)
+        s = model.std
+        self.assertIsNotNone(model._std)
+
+        # make sure it is cached
+        s2 = model.std
+        self.assertIs(s, s2)
+
+        # a D has been calculated
+        self.assertIsNotNone(model._D)
+
+        data = {
+            'Q': np.random.normal(size=(5,)),
+            'F': np.random.normal(size=(5,3)),
+            'D': np.random.normal(size=(3,3)),
+            'Di': np.random.normal(size=(3,3)),
+            'r': np.random.normal(size=(5,))
+        }
+        with self.assertRaises(AssertionError):
+            Model(data)
+
+
 class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
@@ -158,3 +284,75 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.set_models_weights({})
         with self.assertRaises(AssertionError):
             self.portfolio.set_models_weights({rg: v for rg, v in zip(ranges, [1,-2,3])})
+
+    async def test_model_methods(self):
+
+        from pyoptimum.portfolio import Model
+
+        # retrieve models and price
+        market_tickers = ['^DJI', '^RUT']
+        ranges = ['1mo', '6mo', '1y']
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+        await self.portfolio.retrieve_models(market_tickers, ranges,
+                                             include_prices=True)
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+
+        weights = {
+            '1mo': 3,
+            '6mo': 1,
+            '1y': 2
+        }
+        self.portfolio.set_models_weights(weights)
+        weights = {
+            '1mo': 3/6,
+            '6mo': 1/6,
+            '1y': 2/6
+        }
+        self.assertDictEqual(self.portfolio.model_weights, weights)
+
+        self.assertEqual(self.portfolio.model_method, 'linear')
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
+        # check model correctness
+        np.testing.assert_array_almost_equal(1e10 * model.Q,
+                                             1e10*((3/6) * self.portfolio.models['1mo'].Q +
+                                                   (1/6) * self.portfolio.models['6mo'].Q +
+                                                   (2/6) * self.portfolio.models['1y'].Q))
+        np.testing.assert_array_almost_equal(model.F,
+                                             (3/6) * self.portfolio.models['1mo'].F +
+                                             (1/6) * self.portfolio.models['6mo'].F +
+                                             (2/6) * self.portfolio.models['1y'].F)
+        np.testing.assert_array_almost_equal(1e10 * model.D,
+                                             1e10 * ((3/6) * self.portfolio.models['1mo'].D +
+                                                     (1/6) * self.portfolio.models['6mo'].D +
+                                                     (2/6) * self.portfolio.models['1y'].D))
+        np.testing.assert_array_almost_equal(model.r,
+                                             (3/6) * self.portfolio.models['1mo'].r +
+                                             (1/6) * self.portfolio.models['6mo'].r +
+                                             (2/6) * self.portfolio.models['1y'].r)
+
+        self.portfolio.set_model_method('linear-fractional')
+        self.assertEqual(self.portfolio.model_method, 'linear-fractional')
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
+        # check model correctness
+        np.testing.assert_array_almost_equal(1e10 * model.Q,
+                                             1e10*((3/6) * self.portfolio.models['1mo'].Q +
+                                                   (1/6) * self.portfolio.models['6mo'].Q +
+                                                   (2/6) * self.portfolio.models['1y'].Q))
+        np.testing.assert_array_almost_equal(model.F,
+                                             (3/6) * self.portfolio.models['1mo'].F +
+                                             (1/6) * self.portfolio.models['6mo'].F +
+                                             (2/6) * self.portfolio.models['1y'].F)
+        np.testing.assert_array_almost_equal(1e10 * model.Di,
+                                             1e10 * ((3/6) * self.portfolio.models['1mo'].Di +
+                                                     (1/6) * self.portfolio.models['6mo'].Di +
+                                                     (2/6) * self.portfolio.models['1y'].Di))
+        np.testing.assert_array_almost_equal(model.r,
+                                             (3/6) * self.portfolio.models['1mo'].r +
+                                             (1/6) * self.portfolio.models['6mo'].r +
+                                             (2/6) * self.portfolio.models['1y'].r)
