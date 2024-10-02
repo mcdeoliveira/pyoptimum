@@ -1,3 +1,4 @@
+import typing
 import unittest
 import os
 
@@ -285,19 +286,30 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AssertionError):
             self.portfolio.set_models_weights({rg: v for rg, v in zip(ranges, [1,-2,3])})
 
+
+class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
+
+    async def asyncSetUp(self):
+
+        import pyoptimum
+        from pyoptimum.portfolio import Portfolio
+
+        self.portfolio_client = pyoptimum.AsyncClient(username=username, password=password,api='optimize')
+        self.model_client = pyoptimum.AsyncClient(username=username, password=password,api='models')
+        self.portfolio = Portfolio(self.portfolio_client, self.model_client)
+        from pathlib import Path
+        file = Path(__file__).parent / 'test.csv'
+        self.portfolio.import_csv(file)
+
+        # retrieve models and price
+        self.market_tickers = ['^DJI', '^RUT']
+        self.ranges = ['1mo', '6mo', '1y']
+        await self.portfolio.retrieve_models(self.market_tickers, self.ranges,
+                                             include_prices=True)
+
     async def test_model_methods(self):
 
         from pyoptimum.portfolio import Model
-
-        # retrieve models and price
-        market_tickers = ['^DJI', '^RUT']
-        ranges = ['1mo', '6mo', '1y']
-        self.assertFalse(self.portfolio.has_prices())
-        self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges,
-                                             include_prices=True)
-        self.assertTrue(self.portfolio.has_prices())
-        self.assertTrue(self.portfolio.has_models())
 
         weights = {
             '1mo': 3,
@@ -356,3 +368,35 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
                                              (3/6) * self.portfolio.models['1mo'].r +
                                              (1/6) * self.portfolio.models['6mo'].r +
                                              (2/6) * self.portfolio.models['1y'].r)
+
+    async def test_apply_constraint(self):
+
+        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL, Portfolio
+
+        tickers = ['MSFT']
+        value = 1
+        sign = LESS_THAN_OR_EQUAL
+        for function in typing.get_args(Portfolio.ConstraintFunctionLiteral):
+            for unit in typing.get_args(Portfolio.ConstraintUnitLiteral):
+                self.portfolio.apply_constraint(tickers, function, sign, value, unit)
+                if function == 'sales' or function == 'short sales':
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                elif function == 'purchases' or function == 'holdings':
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                self.portfolio.remove_constraints(tickers)
+
+        tickers = ['MSFT', 'AAPL']
+        value = 1
+        sign = LESS_THAN_OR_EQUAL
+        for function in typing.get_args(Portfolio.ConstraintFunctionLiteral):
+            for unit in typing.get_args(Portfolio.ConstraintUnitLiteral):
+                self.portfolio.apply_constraint(tickers, function, sign, value, unit)
+                if function == 'sales' or function == 'short sales':
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                elif function == 'purchases' or function == 'holdings':
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                self.portfolio.remove_constraints(tickers)

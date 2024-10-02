@@ -593,16 +593,18 @@ class Portfolio:
             return
 
         # make sure value is array
-        if isinstance(value, float):
+        if isinstance(value, (int, float)):
             value = [value] * len(tickers)
-        value = np.array(value)
+        value = np.array(value, dtype='float64')
 
         # make sure value is in shares
-        shares = self.portfolio.loc[tickers, 'shares']
-        if unit == 'value':
-            value /= self.portfolio.loc[tickers, 'close ($)']
-        elif unit == 'percent value':
-            value *= shares / self.portfolio.loc[tickers, 'close ($)']
+        shares = self.portfolio.loc[tickers, 'shares'].values
+        if unit != 'shares':
+            close = self.portfolio.loc[tickers, 'close ($)'].values
+            if unit == 'value':
+                value /= close
+            elif unit == 'percent value':
+                value *= shares / close
 
         # initialize
         lb, ub = None, None
