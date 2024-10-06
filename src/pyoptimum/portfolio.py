@@ -62,11 +62,19 @@ class Model:
         self._D = None
         self._std = None
 
-    def to_dict(self, fields: Optional[Iterable]=None, as_list: bool=False) -> dict:
+    def to_dict(self, fields: Optional[Iterable]=None,
+                as_list: bool=False,
+                normalize=False) -> dict:
+        # normalize
+        alpha = np.max(self.std) ** 2 if normalize else 1.0
         if fields:
             d = {f: getattr(self, f) for f in fields}
+            if normalize:
+                for f in ['Q', 'D']:
+                    if f in fields:
+                        d[f] /= alpha
         else:
-            d = { 'r': self.r, 'D': self.D, 'F': self.F, 'Q': self.Q, 'std': self.std }
+            d = { 'r': self.r, 'D': self.D / alpha, 'F': self.F, 'Q': self.Q / alpha, 'std': self.std }
         return {k: v.tolist() for k, v in d.items()} if as_list else d
 
 
@@ -133,7 +141,13 @@ class Portfolio:
 
         # get model data
         model = self.get_model()
-        data = model.to_dict(('r', 'Q', 'D', 'F'), as_list=True)
+        data = model.to_dict(('r', 'Q', 'D', 'F'),
+                             as_list=True,
+                             normalize=True)
+
+        # has regularization
+        if rho > 0:
+            data['rho'] = rho
 
         # get portfolio data
         value0 = self.portfolio['value ($)'].sum()
@@ -161,10 +175,6 @@ class Portfolio:
             # has lower bound
             xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
             data['xup'] = xup.tolist()
-
-        # has regularization
-        if rho > 0:
-            data['rho'] = rho
 
         return data
 
