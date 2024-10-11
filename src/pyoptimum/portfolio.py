@@ -609,12 +609,11 @@ class Portfolio:
 
         # make sure value is in shares
         shares = self.portfolio.loc[tickers, 'shares'].values
-        if unit != 'shares':
+        if unit == 'value':
             close = self.portfolio.loc[tickers, 'close ($)'].values
-            if unit == 'value':
-                value /= close
-            elif unit == 'percent value':
-                value *= shares / close
+            value /= close
+        elif unit == 'percent value':
+            value *= shares / 100
 
         # initialize
         lb, ub = None, None

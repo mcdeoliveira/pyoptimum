@@ -393,6 +393,48 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
         for function in typing.get_args(Portfolio.ConstraintFunctionLiteral):
             for unit in typing.get_args(Portfolio.ConstraintUnitLiteral):
                 self.portfolio.apply_constraint(tickers, function, sign, value, unit)
+                if function == 'purchases':
+                    if unit == 'shares':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'upper'],
+                                                      self.portfolio.portfolio.loc[tickers, 'shares'] + value)
+                    elif unit == 'value':
+                        np.testing.assert_array_equal(
+                            self.portfolio.portfolio.loc[tickers, 'upper'],
+                            self.portfolio.portfolio.loc[tickers, 'shares'] + value / self.portfolio.portfolio.loc[tickers, 'close ($)'])
+                    elif unit == 'percent value':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'upper'],
+                                                      (1 + value/100) * self.portfolio.portfolio.loc[tickers, 'shares'])
+                elif function == 'sales':
+                    if unit == 'shares':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'lower'],
+                                                      self.portfolio.portfolio.loc[tickers, 'shares'] - value)
+                    elif unit == 'value':
+                        np.testing.assert_array_equal(
+                            self.portfolio.portfolio.loc[tickers, 'lower'],
+                            self.portfolio.portfolio.loc[tickers, 'shares'] - value / self.portfolio.portfolio.loc[tickers, 'close ($)'])
+                    elif unit == 'percent value':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'lower'],
+                                                      (1 - value/100) * self.portfolio.portfolio.loc[tickers, 'shares'])
+                elif function == 'holdings':
+                    if unit == 'shares':
+                        self.assertTrue(np.all(self.portfolio.portfolio.loc[tickers, 'upper'] == value))
+                    elif unit == 'value':
+                        np.testing.assert_array_equal(
+                            self.portfolio.portfolio.loc[tickers, 'upper'],
+                            value / self.portfolio.portfolio.loc[tickers, 'close ($)'])
+                    elif unit == 'percent value':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'upper'],
+                                                      (value/100) * self.portfolio.portfolio.loc[tickers, 'shares'])
+                elif function == 'short sales':
+                    if unit == 'shares':
+                        self.assertTrue(np.all(self.portfolio.portfolio.loc[tickers, 'lower'] == -value))
+                    elif unit == 'value':
+                        np.testing.assert_array_equal(
+                            self.portfolio.portfolio.loc[tickers, 'lower'],
+                            -value / self.portfolio.portfolio.loc[tickers, 'close ($)'])
+                    elif unit == 'percent value':
+                        np.testing.assert_array_equal(self.portfolio.portfolio.loc[tickers, 'lower'],
+                                                      -(value/100) * self.portfolio.portfolio.loc[tickers, 'shares'])
                 if function == 'sales' or function == 'short sales':
                     self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
                     self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
