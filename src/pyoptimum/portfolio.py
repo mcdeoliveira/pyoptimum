@@ -1,4 +1,5 @@
 import io
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Iterable, Literal, Any, Union, List, Tuple, Dict
 
@@ -12,19 +13,26 @@ from pyoptimum import AsyncClient
 
 class Model:
 
-    def __init__(self, data: dict):
-        self.r = np.array(data['r'])
-        self.F = np.array(data['F'])
-        self.Q = np.array(data['Q'])
+    def __init__(self, data: Union[dict, "Model"]):
+        if isinstance(data, Model):
+            # copy constructor
+            for k, v in data.__dict__.items():
+                setattr(self, k, deepcopy(v))
 
-        self._std = None
-        self._Di = None
-        self._D = None
-        if 'Di' in data:
-            assert 'D' not in data, "Di and D cannot be both in model data"
-            self.Di = np.array(data['Di'])
         else:
-            self.D = np.array(data['D'])
+            # from dict
+            self.r = np.array(data['r'])
+            self.F = np.array(data['F'])
+            self.Q = np.array(data['Q'])
+
+            self._std = None
+            self._Di = None
+            self._D = None
+            if 'Di' in data:
+                assert 'D' not in data, "Di and D cannot be both in model data"
+                self.Di = np.array(data['Di'])
+            else:
+                self.D = np.array(data['D'])
 
     @property
     def std(self):
@@ -235,6 +243,24 @@ class Portfolio:
         """
         return bool(self.models)
 
+    def set_models(self, models: dict[str, Union[dict, Model]],
+                   model_weights: Optional[Dict[str, float]]=None) -> None:
+        """
+        Set portfolio models
+
+        :param models: a dictionary with the models per range
+        :param model_weights: the model weights
+        """
+        # add models
+        self.models = {rg: Model(data) for rg, data in models.items()}
+
+        # set model weights
+        model_weights = model_weights or {rg: 1.0 for rg in models.keys()}
+        self.set_models_weights(model_weights)
+
+        # reinitialize frontier
+        self.invalidate_frontier()
+
     def get_model(self) -> Model:
         """
         :return: the portfolio model for the current model and weights
@@ -343,21 +369,14 @@ class Portfolio:
                 'include_prices': include_prices
             }
         }
-        model = await self.model_client.call('model', data)
+        models = await self.model_client.call('model', data)
 
         if include_prices:
             # update prices
-            self._update_prices(model.pop('prices'))
+            self._update_prices(models.pop('prices'))
 
-        # add models
-        self.models = {rg: Model(data) for rg, data in model.items()}
-
-        # set model weights
-        model_weights = model_weights or {rg: 1.0 for rg in model.keys()}
-        self.set_models_weights(model_weights)
-
-        # reinitialize frontier
-        self.invalidate_frontier()
+        # set models
+        self.set_models(models, model_weights)
 
     async def retrieve_frontier(self,
                                 cashflow: float, max_sales: float,

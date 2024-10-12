@@ -163,6 +163,37 @@ class TestModel(unittest.TestCase):
         with self.assertRaises(AssertionError):
             Model(data)
 
+    def test_constructor_2(self):
+
+        from pyoptimum.portfolio import Model
+
+        data = {
+            'Q': np.random.normal(size=(5,)),
+            'F': np.random.normal(size=(5,3)),
+            'D': np.random.normal(size=(3,3)),
+            'r': np.random.normal(size=(5,))
+        }
+        data['Q'] = data['Q'].T @ data['Q']
+        data['D'] = data['D'].T @ data['D']
+
+        # create model
+        model_1 = Model(data)
+
+        # copy constructor
+        model_2 = Model(model_1)
+        np.testing.assert_array_equal(model_1.r, model_2.r)
+        np.testing.assert_array_equal(model_1.Q, model_2.Q)
+        np.testing.assert_array_equal(model_1.F, model_2.F)
+        np.testing.assert_array_equal(model_1.D, model_2.D)
+        np.testing.assert_array_equal(model_1.Di, model_2.Di)
+        np.testing.assert_array_equal(model_1.std, model_2.std)
+
+        self.assertIsNot(model_1.r, model_2.r)
+        self.assertIsNot(model_1.Q, model_2.Q)
+        self.assertIsNot(model_1.F, model_2.F)
+        self.assertIsNot(model_1.D, model_2.D)
+        self.assertIsNot(model_1.Di, model_2.Di)
+        self.assertIsNot(model_1.std, model_2.std)
 
 class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
