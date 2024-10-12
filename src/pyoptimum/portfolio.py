@@ -243,7 +243,7 @@ class Portfolio:
         """
         return bool(self.models)
 
-    def set_models(self, models: dict[str, Union[dict, Model]],
+    def set_models(self, models: Dict[str, Union[dict, Model]],
                    model_weights: Optional[Dict[str, float]]=None) -> None:
         """
         Set portfolio models
