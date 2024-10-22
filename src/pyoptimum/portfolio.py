@@ -1,4 +1,5 @@
 import io
+import datetime
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Iterable, Literal, Any, Union, List, Tuple, Dict
@@ -92,7 +93,6 @@ GREATER_THAN_OR_EQUAL = "\u2265"
 class Portfolio:
 
     ModelMethodLiteral = Literal['linear', 'linear-fractional']
-    ReturnModelLiteral = Literal['median', 'mean']
 
     MethodLiteral = Literal['approximate', 'optimal', 'none']
     ConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales']
@@ -343,16 +343,16 @@ class Portfolio:
     async def retrieve_models(self,
                               market_tickers: List[str],
                               ranges: Union[str, List[str]],
-                              return_model: ReturnModelLiteral = 'median',
+                              end: datetime.date = datetime.date.today(),
                               common_factors: bool = False,
                               include_prices: bool = False,
                               model_weights: Dict[str, float] = None) -> None:
         """
-        Retrieve the portfolio models based on market tickers
+        Retrieve portfolio models based on market tickers
 
         :param market_tickers: the market tickers
         :param ranges: the ranges to retrieve the portfolio models
-        :param return_model: the type of return model
+        :param end: the last day to retrieve models
         :param common_factors: whether to keep factors common
         :param include_prices: whether to include prices on results
         :param model_weights: the model weights
@@ -362,10 +362,10 @@ class Portfolio:
         data = {
             'tickers': self.portfolio.index.tolist(),
             'market': market_tickers,
+            'end': str(end),
             'range': ranges,
             'options': {
                 'common': common_factors,
-                'return_model': return_model,
                 'include_prices': include_prices
             }
         }
