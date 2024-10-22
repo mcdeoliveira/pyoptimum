@@ -77,7 +77,7 @@ class TestBasic(unittest.TestCase):
         client = pyoptimum.Client(username=username, password=password,
                                   base_url=base_url, api='optimizeXY', prefix='api')
         self.assertIsNone(client.token)
-        with self.assertRaises(pyoptimum.PyOptimumException):
+        with self.assertRaises(requests.exceptions.HTTPError):
             client.get_token()
 
     def test_optimize(self):

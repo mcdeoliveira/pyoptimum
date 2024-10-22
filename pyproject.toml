@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pyoptimum"
-version = "0.9.10"
+version = "0.9.11"
 authors = [
     { name = "Mauricio C. de Oliveira", email = "mcdeoliveira@duck.com" }
 ]
