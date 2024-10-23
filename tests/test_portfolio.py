@@ -318,6 +318,74 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.set_models_weights({rg: v for rg, v in zip(ranges, [1,-2,3])})
 
 
+class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self):
+        import pyoptimum
+        from pyoptimum.portfolio import Portfolio
+
+        self.portfolio_client = pyoptimum.AsyncClient(username=username,
+                                                      password=password, api='optimize')
+        self.model_client = pyoptimum.AsyncClient(username=username, password=password,
+                                                  api='models')
+        self.portfolio = Portfolio(self.portfolio_client, self.model_client)
+        from pathlib import Path
+        file = Path(__file__).parent / 'test_zero.csv'
+        self.portfolio.import_csv(file)
+
+    async def test_prices(self):
+
+        self.assertEqual(self.portfolio.get_value(), 0.0)
+
+        # retrieve prices
+        self.assertFalse(self.portfolio.has_prices())
+        await self.portfolio.retrieve_prices()
+        self.assertTrue(self.portfolio.has_prices())
+
+        self.assertEqual(self.portfolio.get_value(),
+                         sum(self.portfolio.portfolio['value ($)']))
+        self.assertEqual(self.portfolio.get_value(), 0.0)
+
+        self.assertIn('close ($)', self.portfolio.portfolio)
+        self.assertIn('value ($)', self.portfolio.portfolio)
+        self.assertIn('value (%)', self.portfolio.portfolio)
+        np.testing.assert_array_equal(self.portfolio.portfolio['value ($)'], 0.0)
+        np.testing.assert_array_equal(self.portfolio.portfolio['value (%)'], 0.0)
+
+        with self.assertRaises(AssertionError):
+            await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+
+    async def test_frontier(self):
+
+        # retrieve prices
+        self.assertFalse(self.portfolio.has_prices())
+        await self.portfolio.retrieve_prices()
+        self.assertTrue(self.portfolio.has_prices())
+
+        # retrieve models
+        market_tickers = ['^DJI']
+        ranges = ['1mo', '6mo', '1y']
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+        await self.portfolio.retrieve_models(market_tickers, ranges)
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+
+        # zero cashflow without short sales
+        with self.assertRaises(ValueError) as e:
+            await self.portfolio.retrieve_frontier(0, 100, False, True, True)
+        self.assertTrue("Cashflow cannot be zero" in str(e.exception))
+
+        # retrieve frontier
+        await self.portfolio.retrieve_frontier(1000, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+        x0 = self.portfolio.frontier['x']
+
+        # retrieve frontier
+        await self.portfolio.retrieve_frontier(-1000, 100, True, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+        np.testing.assert_array_almost_equal(self.portfolio.frontier['x'][0], -x0[0], 1e-4)
+
 class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):

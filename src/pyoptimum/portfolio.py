@@ -135,10 +135,9 @@ class Portfolio:
 
         # update portfolio value and weights
         self.portfolio['close ($)'] = prices['close']
-        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio[
-            'close ($)']
-        value = sum(self.portfolio['value ($)'])
-        self.portfolio['value (%)'] = self.portfolio['value ($)'] / value
+        self.portfolio['value ($)'] = self.portfolio['shares'] * self.portfolio['close ($)']
+        value = self.get_value()
+        self.portfolio['value (%)'] = self.portfolio['value ($)'] / value if value > 0.0 else 0.0
 
         return value
 
@@ -158,20 +157,34 @@ class Portfolio:
             data['rho'] = rho
 
         # get portfolio data
-        value0 = self.portfolio['value ($)'].sum()
+        value0 = self.get_value()
         value = value0 + cashflow
         x0 = self.portfolio['value (%)']
         data['x0'] = x0.tolist()
 
+        # check bound in max_sales
+        if np.isfinite(max_sales) and max_sales < 0:
+            raise ValueError('max_sales must be non-negative')
+
         # add cashflow and constraints
-        data['cashflow'] = cashflow / value0
+        if value0 > 0.0:
+            data['cashflow'] = cashflow / value0
+            if np.isfinite(max_sales):
+                data['constraints'] = [
+                    {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
+        else:
+            if cashflow == 0:
+                raise ValueError("Cashflow cannot be zero on a portfolio with no shares")
+            if np.isfinite(max_sales) and not short_sales:
+                sell = False
+
+            data['cashflow'] = 1
+
         data['options'] = {
             'short': short_sales,
             'buy': buy,
             'sell': sell
         }
-        data['constraints'] = [
-            {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
 
         # has lower bound
         if np.isfinite(self.portfolio['lower']).any():
@@ -180,7 +193,6 @@ class Portfolio:
 
         # has upper bound
         if np.isfinite(self.portfolio['upper']).any():
-            # has lower bound
             xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
             data['xup'] = xup.tolist()
 
@@ -205,9 +217,13 @@ class Portfolio:
     def return_and_variance(x: npt.NDArray, model: Model) -> Tuple[float, float]:
         # normalize for calculating return and standard deviation
         value = sum(x)
-        mu = np.dot(x, model.r) / value
-        v = model.F.transpose() @ x
-        std = np.sqrt(np.dot(model.Q * x, x) + np.dot(model.D @ v, v)) / value
+        if value > 0:
+            mu = np.dot(x, model.r) / value
+            v = model.F.transpose() @ x
+            std = np.sqrt(np.dot(model.Q * x, x) + np.dot(model.D @ v, v)) / value
+        else:
+            mu = 0.0
+            std = 0.0
         return mu, std
 
     def invalidate_model(self):
@@ -312,6 +328,9 @@ class Portfolio:
         # initialize shares
         if 'shares' not in portfolio.columns:
             portfolio['shares'] = 0.0
+
+        # make sure shares are float
+        portfolio = portfolio.astype({"shares": float})
 
         # initialize lower and upper
         portfolio['lower'] = -np.inf
