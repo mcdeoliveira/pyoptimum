@@ -352,7 +352,8 @@ class Portfolio:
 
         # retrieve prices
         data = {'symbols': self.portfolio.index.tolist()}
-        prices = await self.model_client.call('prices', data)
+        prices = await self.model_client.call('prices', data,
+                                              follow_resource=True)
 
         # add prices to dataframe
         value = self._update_prices(prices)
@@ -388,7 +389,8 @@ class Portfolio:
                 'include_prices': include_prices
             }
         }
-        models = await self.model_client.call('model', data)
+        models = await self.model_client.call('model', data,
+                                              follow_resource=True)
 
         if include_prices:
             # update prices
@@ -419,7 +421,8 @@ class Portfolio:
         # retrieve frontier
         query = self._get_portfolio_query(cashflow, max_sales,
                                           short_sales, buy, sell, rho)
-        sol = await self.portfolio_client.call('frontier', query)
+        sol = await self.portfolio_client.call('frontier', query,
+                                               follow_resource=True)
 
         if len(sol['frontier']) == 0:
             self.invalidate_frontier()
@@ -498,7 +501,8 @@ class Portfolio:
             data = self.frontier_query_params.copy()
             data['mu'] = mu
 
-            recs = await self.portfolio_client.call('portfolio', data)
+            recs = await self.portfolio_client.call('portfolio', data,
+                                                    follow_resource=True)
             if recs['status'] == 'optimal':
                 x = np.array(recs['x'])
                 _, std = Portfolio.return_and_variance(x, self.get_model())

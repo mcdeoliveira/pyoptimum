@@ -1,9 +1,13 @@
+import logging
 import base64
 import re
 from json import JSONDecodeError
 from typing import Optional, Any
 
 import json
+import asyncio
+
+logger = logging.getLogger(__name__)
 
 
 class PyOptimumException(Exception):
@@ -205,13 +209,18 @@ class AsyncClient(Client):
                     resp.raise_for_status()
 
 
-    async def call(self, entry_point: str, data: Any) -> Any:
+    async def call(self, entry_point: str, data: Any,
+                   follow_resource: bool=False,
+                   wait_time: float=1, max_retries: int=10) -> Any:
         """
         Calls the api ``entry_point`` with ``data``
 
         :param entry_point: the api entry point
         :param data: the data
         :return: dictionary with the response
+        :param follow_resource: whether to automatically retrieve resource if calculation is deferred
+        :param wait_time: how many seconds to wait before pooling resource again
+        :param max_retries: maximum number of retries
         """
 
         from aiohttp import ClientSession
@@ -235,11 +244,79 @@ class AsyncClient(Client):
                                     headers=headers) as resp:
                 if resp.status < 400:
 
+                    # retrieve data
                     try:
                         self.detail = None
-                        return await resp.json()
+                        data = await resp.json()
                     except JSONDecodeError as e:
                         raise PyOptimumException(f"Invalid response: {e}")
+
+                    if resp.status == 202 and follow_resource:
+                        # calculation is deferred
+
+                        # pool resource for status
+                        id = data['id']
+                        logger.debug("will wait for resource '%s'", id)
+                        k = 0
+                        while resp.status != 302:
+
+                            # sleep
+                            logger.debug('will sleep (k = %d)', k)
+                            await asyncio.sleep(32 * (1 - 0.97 ** k) + 1)
+
+                            # pool resource
+                            logger.debug('pooling resource')
+                            async with session.get(Client.url_join(self.base_url,
+                                                                   f'resource/{id}/status'),
+                                                   data=json.dumps(data),
+                                                   headers=headers,
+                                                   allow_redirects=False) as resp:
+                                logger.debug(f'status = {resp.status}')
+                                if resp.status == 302:
+                                    # resource is ready
+                                    logger.debug('resource is ready')
+                                    break
+                                elif resp.status >= 400:
+                                    # raise exception
+                                    content = await resp.json()
+                                    self.detail = content.get('detail', None)
+                                    if self.detail:
+                                        raise PyOptimumException(self.detail)
+                                elif resp.status == 200:
+                                    content = await resp.json()
+                                    logger.debug("status = '%s'", content)
+
+                                k += 1
+                                if k > max_retries:
+                                    self.detail = 'Maximum number of retries exceeded'
+                                    if self.detail:
+                                        raise PyOptimumException(self.detail)
+
+                        # resource is ready, retrieve value
+                        logger.debug('retrieving resource')
+                        async with session.get(Client.url_join(self.base_url,
+                                                               f'resource/{id}/value'),
+                                               data=json.dumps(data),
+                                               headers=headers) as resp:
+                            if resp.status >= 400:
+
+                                # raise exception
+                                content = await resp.json()
+                                self.detail = content.get('detail', None)
+                                if self.detail:
+                                    raise PyOptimumException(self.detail)
+
+                            else:
+
+                                # retrieve data
+                                logger.debug('got data')
+                                try:
+                                    self.detail = None
+                                    data = await resp.json()
+                                except JSONDecodeError as e:
+                                    raise PyOptimumException(f"Invalid response: {e}")
+
+                    return data
 
                 elif resp.status == 400:
                     content = json.loads(await resp.content.read())

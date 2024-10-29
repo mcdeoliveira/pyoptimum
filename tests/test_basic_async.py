@@ -59,7 +59,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
     async def test_models(self):
 
         client = pyoptimum.AsyncClient(username=username, password=password,
-                                  base_url=base_url, api='models')
+                                       base_url=base_url, api='models')
 
         self.assertIsNone(client.token)
         await client.get_token()
@@ -68,7 +68,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
     async def test_portfolio(self):
 
         client = pyoptimum.AsyncClient(username=username, password=password,
-                                  base_url=base_url)
+                                       base_url=base_url)
 
         s1 = 0.06
         s2 = 0.03
@@ -104,6 +104,58 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(pyoptimum.PyOptimumException):
             await client.call('portfolio', data)
         self.assertIn('must be an array', client.detail)
+
+    async def test_portfolio_async(self):
+
+        client = pyoptimum.AsyncClient(username=username, password=password,
+                                       base_url=base_url)
+
+        s1 = 0.06
+        s2 = 0.03
+        rho = 1
+        data = {
+            'Q': [[s1 ** 2, s1 * s2 * rho], [s1 * s2 * rho, s2 ** 2]],
+            'cashflow': 1,
+            'mu': 0.11,
+            'r': [.14, .08],
+            'is_async': True
+        }
+        response = await client.call('portfolio', data,
+                                     follow_resource=True, wait_time=1)
+
+        obj = response.get('obj')
+        self.assertTrue(math.fabs(math.sqrt(obj) - .045) < 1e-5)
+
+        status = response.get('status')
+        self.assertEqual(status, 'optimal')
+
+        x = response.get('x')
+        self.assertAlmostEqual(x[0], .5)
+        self.assertAlmostEqual(x[1], .5)
+
+        self.assertIsNone(client.detail)
+
+        # call with slash
+        response = await client.call('/portfolio', data,
+                                     follow_resource=True)
+
+        obj = response.get('obj')
+        self.assertTrue(math.fabs(math.sqrt(obj) - .045) < 1e-5)
+
+        # call with errors
+        data['r'] = [.14, .08, 0]
+        with self.assertRaises(pyoptimum.PyOptimumException):
+            await client.call('portfolio', data,
+                              follow_resource=True)
+        self.assertIn('must be an array', client.detail)
+
+        # call with errors
+        data['r'] = [.14, .08]
+        data['options'] = { 'mu_max': -1 }
+        with self.assertRaises(pyoptimum.PyOptimumException):
+            await client.call('frontier', data,
+                              follow_resource=True)
+        self.assertIn('is larger than mu_max', client.detail)
 
     async def test_forbidden(self):
 
