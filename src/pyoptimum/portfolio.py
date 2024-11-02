@@ -1,91 +1,13 @@
 import io
 import datetime
-from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Iterable, Literal, Any, Union, List, Tuple, Dict
+from typing import Optional, Literal, Any, Union, List, Tuple, Dict
 
 import numpy as np
 import pandas as pd
 
-from numpy import typing as npt
-
 from pyoptimum import AsyncClient
-
-
-class Model:
-
-    def __init__(self, data: Union[dict, "Model"]):
-        if isinstance(data, Model):
-            # copy constructor
-            for k, v in data.__dict__.items():
-                setattr(self, k, deepcopy(v))
-
-        else:
-            # from dict
-            self.r = np.array(data['r'])
-            self.F = np.array(data['F'])
-            self.Q = np.array(data['Q'])
-
-            self._std = None
-            self._Di = None
-            self._D = None
-            if 'Di' in data:
-                assert 'D' not in data, "Di and D cannot be both in model data"
-                self.Di = np.array(data['Di'])
-            else:
-                self.D = np.array(data['D'])
-
-    @property
-    def std(self):
-        if self._std is None:
-            self._std = np.sqrt(self.Q + np.diag(self.F @ self.D @ self.F.transpose()))
-        return self._std
-
-    @property
-    def D(self):
-        if self._D is None:
-            # calculate inverse first
-            D = np.linalg.inv(self.Di)
-            D = (D + D.T)/2
-            self._D = D
-        return self._D
-
-    @D.setter
-    def D(self, value: npt.NDArray):
-        self._D = value
-        self._Di = None
-        self._std = None
-
-    @property
-    def Di(self):
-        if self._Di is None:
-            # calculate inverse first
-            Di = np.linalg.inv(self.D)
-            Di = (Di + Di.T)/2
-            self._Di = Di
-        return self._Di
-
-    @Di.setter
-    def Di(self, value: npt.NDArray):
-        self._Di = value
-        self._D = None
-        self._std = None
-
-    def to_dict(self, fields: Optional[Iterable]=None,
-                as_list: bool=False,
-                normalize=False) -> dict:
-        # normalize
-        alpha = np.max(self.std) ** 2 if normalize else 1.0
-        if fields:
-            d = {f: getattr(self, f) for f in fields}
-            if normalize:
-                for f in ['Q', 'D']:
-                    if f in fields:
-                        d[f] /= alpha
-        else:
-            d = { 'r': self.r, 'D': self.D / alpha, 'F': self.F, 'Q': self.Q / alpha, 'std': self.std }
-        return {k: v.tolist() for k, v in d.items()} if as_list else d
-
+from pyoptimum.model import Model
 
 LESS_THAN_OR_EQUAL = "\u2264"
 GREATER_THAN_OR_EQUAL = "\u2265"
@@ -197,34 +119,6 @@ class Portfolio:
             data['xup'] = xup.tolist()
 
         return data
-
-    @staticmethod
-    def unconstrained_frontier(model: Model, x_bar: float=1.):
-        # TODO: improve calculation by using the lemma of the inverse instead of
-        #       assembling the entire covariance matrix
-        q = np.diag(model.Q) + model.F @ model.D @ model.F.transpose()
-        b = np.vstack((model.r, np.ones((len(model.r))))).transpose()
-        bsb = b.transpose() @ np.linalg.solve(q, b)
-        bsb_inv = np.linalg.inv(bsb)
-        a = bsb_inv[0, 0]
-        b = -bsb_inv[0, 1]
-        c = bsb_inv[1, 1]
-        mu_star = b * x_bar / a
-        sigma_0 = np.sqrt(c - b ** 2 / a) * x_bar
-        return a, mu_star, sigma_0
-
-    @staticmethod
-    def return_and_variance(x: npt.NDArray, model: Model) -> Tuple[float, float]:
-        # normalize for calculating return and standard deviation
-        value = sum(x)
-        if value > 0:
-            mu = np.dot(x, model.r) / value
-            v = model.F.transpose() @ x
-            std = np.sqrt(np.dot(model.Q * x, x) + np.dot(model.D @ v, v)) / value
-        else:
-            mu = 0.0
-            std = 0.0
-        return mu, std
 
     def invalidate_model(self):
         """
@@ -366,7 +260,7 @@ class Portfolio:
                               end: datetime.date = datetime.date.today(),
                               common_factors: bool = False,
                               include_prices: bool = False,
-                              model_weights: Dict[str, float] = None) -> None:
+                              model_weights: Dict[str, float] = None) -> List[str]:
         """
         Retrieve portfolio models based on market tickers
 
@@ -376,6 +270,7 @@ class Portfolio:
         :param common_factors: whether to keep factors common
         :param include_prices: whether to include prices on results
         :param model_weights: the model weights
+        :return a list of messages
         """
 
         # retrieve models
@@ -396,8 +291,13 @@ class Portfolio:
             # update prices
             self._update_prices(models.pop('prices'))
 
+        # remove messages
+        messages = models.pop('messages')
+
         # set models
         self.set_models(models, model_weights)
+
+        return messages
 
     async def retrieve_frontier(self,
                                 cashflow: float, max_sales: float,
@@ -435,7 +335,7 @@ class Portfolio:
             if s['sol']['status'] == 'optimal':
                 mu = s['mu']
                 x = np.array(s['sol']['x'])
-                _, std = Portfolio.return_and_variance(x, model)
+                _, std = model.return_and_variance(x)
                 values.append((mu, std, x))
 
         # assemble return dataframe
@@ -505,7 +405,7 @@ class Portfolio:
                                                     follow_resource=True)
             if recs['status'] == 'optimal':
                 x = np.array(recs['x'])
-                _, std = Portfolio.return_and_variance(x, self.get_model())
+                _, std = self.get_model().return_and_variance(x)
                 return {'x': x, 'status': recs['status'], 'std': std, 'mu': mu}
             else:
                 # return approximate if optimization failed
@@ -540,7 +440,7 @@ class Portfolio:
         if self.has_frontier():
             model = self.get_model()
             mu_std = (self.frontier['x']
-                      .apply(lambda x: pd.Series(Portfolio.return_and_variance(x, model),
+                      .apply(lambda x: pd.Series(model.return_and_variance(x),
                                                  index=['mu', 'std'])))
             self.frontier[['mu', 'std']] = mu_std
             self.frontier_method = 'approximate'
@@ -600,13 +500,13 @@ class Portfolio:
         """
         :return: the return and standard deviation of the current portfolio
         """
-        return Portfolio.return_and_variance(self.portfolio['value (%)'], self.get_model())
+        return self.get_model().return_and_variance(self.portfolio['value (%)'])
 
     def get_unconstrained_frontier(self, x_bar: float=1.):
         """
         :return: the unconstrained frontier parameters
         """
-        return Portfolio.unconstrained_frontier(self.get_model(), x_bar)
+        return self.get_model().unconstrained_frontier(x_bar)
 
     def remove_constraints(self, tickers: List[str]) -> None:
         """

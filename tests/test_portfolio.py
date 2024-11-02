@@ -39,162 +39,6 @@ class TestBasic(unittest.TestCase):
         self.assertEqual(portfolio.get_value(), 0.0)
 
 
-class TestModel(unittest.TestCase):
-
-    def test_constructor_1(self):
-
-        from pyoptimum.portfolio import Model
-
-        data = {
-            'Q': np.random.normal(size=(5,)),
-            'F': np.random.normal(size=(5,3)),
-            'D': np.random.normal(size=(3,3)),
-            'r': np.random.normal(size=(5,))
-        }
-        data['Q'] = data['Q'].T @ data['Q']
-        data['D'] = data['D'].T @ data['D']
-
-        # data does not have Di
-        model = Model(data)
-        self.assertIsNone(model._Di)
-
-        # will calculate Di
-        di = model.Di
-        self.assertIsNotNone(model._Di)
-        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
-
-        # make sure it is cached
-        di2 = model.Di
-        self.assertIs(di, di2)
-
-        # will set D
-        D = np.random.normal(size=(3, 3))
-        D = D.T @ D
-        model.D = D
-        self.assertIsNone(model._Di)
-
-        # will calculate Di
-        di = model.Di
-        self.assertIsNotNone(model._Di)
-        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
-
-        # make sure it is cached
-        di2 = model.Di
-        self.assertIs(di, di2)
-
-        # will set Di
-        Di = np.random.normal(size=(3, 3))
-        Di = Di.T @ Di
-        model.Di = Di
-        self.assertIsNone(model._D)
-
-        # will calculate D
-        d = model.D
-        self.assertIsNotNone(model._D)
-        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
-
-        # make sure it is cached
-        d2 = model.D
-        self.assertIs(d, d2)
-
-        data = {
-            'Q': np.random.normal(size=(5,)),
-            'F': np.random.normal(size=(5,3)),
-            'Di': np.random.normal(size=(3,3)),
-            'r': np.random.normal(size=(5,))
-        }
-        data['Q'] = data['Q'].T @ data['Q']
-        data['Di'] = data['Di'].T @ data['Di']
-
-        # data does not have D
-        model = Model(data)
-        self.assertIsNone(model._D)
-
-        # will calculate D
-        d = model.D
-        self.assertIsNotNone(model._D)
-        np.testing.assert_array_almost_equal(model.D @ model.Di, np.eye(3))
-
-        # make sure it is cached
-        d2 = model.D
-        self.assertIs(d, d2)
-
-        # test std
-        self.assertIsNone(model._std)
-        s = model.std
-        self.assertIsNotNone(model._std)
-
-        # make sure it is cached
-        s2 = model.std
-        self.assertIs(s, s2)
-
-        data = {
-            'Q': np.random.normal(size=(5,)),
-            'F': np.random.normal(size=(5,3)),
-            'Di': np.random.normal(size=(3,3)),
-            'r': np.random.normal(size=(5,))
-        }
-        data['Q'] = data['Q'].T @ data['Q']
-        data['Di'] = data['Di'].T @ data['Di']
-
-        # data does not have D
-        model = Model(data)
-        self.assertIsNone(model._D)
-
-        # test std
-        self.assertIsNone(model._std)
-        s = model.std
-        self.assertIsNotNone(model._std)
-
-        # make sure it is cached
-        s2 = model.std
-        self.assertIs(s, s2)
-
-        # a D has been calculated
-        self.assertIsNotNone(model._D)
-
-        data = {
-            'Q': np.random.normal(size=(5,)),
-            'F': np.random.normal(size=(5,3)),
-            'D': np.random.normal(size=(3,3)),
-            'Di': np.random.normal(size=(3,3)),
-            'r': np.random.normal(size=(5,))
-        }
-        with self.assertRaises(AssertionError):
-            Model(data)
-
-    def test_constructor_2(self):
-
-        from pyoptimum.portfolio import Model
-
-        data = {
-            'Q': np.random.normal(size=(5,)),
-            'F': np.random.normal(size=(5,3)),
-            'D': np.random.normal(size=(3,3)),
-            'r': np.random.normal(size=(5,))
-        }
-        data['Q'] = data['Q'].T @ data['Q']
-        data['D'] = data['D'].T @ data['D']
-
-        # create model
-        model_1 = Model(data)
-
-        # copy constructor
-        model_2 = Model(model_1)
-        np.testing.assert_array_equal(model_1.r, model_2.r)
-        np.testing.assert_array_equal(model_1.Q, model_2.Q)
-        np.testing.assert_array_equal(model_1.F, model_2.F)
-        np.testing.assert_array_equal(model_1.D, model_2.D)
-        np.testing.assert_array_equal(model_1.Di, model_2.Di)
-        np.testing.assert_array_equal(model_1.std, model_2.std)
-
-        self.assertIsNot(model_1.r, model_2.r)
-        self.assertIsNot(model_1.Q, model_2.Q)
-        self.assertIsNot(model_1.F, model_2.F)
-        self.assertIsNot(model_1.D, model_2.D)
-        self.assertIsNot(model_1.Di, model_2.Di)
-        self.assertIsNot(model_1.std, model_2.std)
-
 class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
@@ -250,7 +94,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AssertionError):
             await self.portfolio.retrieve_frontier(0, 0, False, True, True)
 
-        from pyoptimum.portfolio import Model
+        from pyoptimum.model import Model
 
         model = self.portfolio.get_model()
         self.assertIsInstance(model, Model)
@@ -276,7 +120,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         await self.portfolio.retrieve_frontier(0, 0, False, True, True)
         self.assertTrue(self.portfolio.has_frontier())
 
-        from pyoptimum.portfolio import Model
+        from pyoptimum.model import Model
 
         model = self.portfolio.get_model()
         self.assertIsInstance(model, Model)
@@ -408,7 +252,7 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
 
     async def test_model_methods(self):
 
-        from pyoptimum.portfolio import Model
+        from pyoptimum.model import Model
 
         weights = {
             '1mo': 3,
