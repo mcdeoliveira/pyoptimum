@@ -211,7 +211,7 @@ class AsyncClient(Client):
 
     async def call(self, entry_point: str, data: Any,
                    follow_resource: bool=False,
-                   wait_time: float=1, max_retries: int=10) -> Any:
+                   wait_time: float=10, max_retries: int=18) -> Any:
         """
         Calls the api ``entry_point`` with ``data``
 
@@ -261,8 +261,8 @@ class AsyncClient(Client):
                         while resp.status != 302:
 
                             # sleep
-                            logger.debug('will sleep (k = %d)', k)
-                            await asyncio.sleep(32 * (1 - 0.97 ** k) + 1)
+                            logger.debug('will sleep %ds (k = %d)', wait_time, k)
+                            await asyncio.sleep(wait_time)
 
                             # pool resource
                             logger.debug('pooling resource')
