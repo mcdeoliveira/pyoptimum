@@ -214,3 +214,8 @@ class TestModel(unittest.TestCase):
             mu, std = model.return_and_variance(x)
         self.assertEqual(str(w.warnings[0].message), "Total portfolio is negative")
         np.testing.assert_array_almost_equal([mu, std], [-3.8480800555552026, 3.726822456664636])
+
+        with self.assertWarns(Warning) as w:
+            mu, std = model.return_and_variance(0 * x)
+        self.assertEqual(str(w.warnings[0].message), "Total portfolio is zero")
+        np.testing.assert_array_almost_equal([mu, std], [0, 0])

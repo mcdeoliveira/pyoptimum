@@ -110,6 +110,9 @@ class Model:
         if value < 0:
             value = -value
             warnings.warn("Total portfolio is negative")
+        elif value == 0.:
+            value = 1
+            warnings.warn("Total portfolio is zero")
         mu = np.dot(x, self.r) / value
         v = self.F.transpose() @ x
         std = np.sqrt(np.dot(self.Q * x, x) + np.dot(self.D @ v, v)) / value
