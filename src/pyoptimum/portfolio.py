@@ -24,7 +24,10 @@ class Portfolio:
     def __init__(self,
                  portfolio_client: AsyncClient,
                  model_client: AsyncClient,
-                 model_method: ModelMethodLiteral = 'linear'):
+                 model_method: ModelMethodLiteral = 'linear',
+                 follow_resource: bool = True,
+                 max_retries: int = 18,
+                 wait_time: Optional[float]=None):
         self.portfolio_client = portfolio_client
         self.model_client = model_client
         self.model_method = model_method
@@ -34,6 +37,9 @@ class Portfolio:
         self.frontier = None
         self.frontier_query_params = {}
         self.frontier_method: Portfolio.MethodLiteral = 'none'
+        self.follow_resource = follow_resource
+        self.max_retries = max_retries
+        self.wait_time = wait_time
 
     @staticmethod
     def _locate_value(value: Any, column: str, df: pd.DataFrame) -> Tuple[Optional[pd.Series], Optional[pd.Series]]:
@@ -119,6 +125,22 @@ class Portfolio:
             data['xup'] = xup.tolist()
 
         return data
+
+    def set_follow_resource(self, follow_resource: bool,
+                            max_retries: int=18,
+                            wait_time: Optional[float]=None) -> None:
+        self.follow_resource = follow_resource
+        self.max_retries = max_retries
+        self.wait_time = wait_time
+
+    def get_follow_resource(self) -> dict:
+        results = {
+            'follow_resource': self.follow_resource,
+            'max_retries': self.max_retries
+        }
+        if self.wait_time is not None:
+            results['wait_time'] = self.wait_time
+        return results
 
     def invalidate_model(self):
         """
@@ -247,7 +269,7 @@ class Portfolio:
         # retrieve prices
         data = {'symbols': self.portfolio.index.tolist()}
         prices = await self.model_client.call('prices', data,
-                                              follow_resource=True)
+                                              **self.get_follow_resource())
 
         # add prices to dataframe
         value = self._update_prices(prices)
@@ -285,7 +307,7 @@ class Portfolio:
             }
         }
         models = await self.model_client.call('model', data,
-                                              follow_resource=True)
+                                              **self.get_follow_resource())
 
         if include_prices:
             # update prices
@@ -322,7 +344,7 @@ class Portfolio:
         query = self._get_portfolio_query(cashflow, max_sales,
                                           short_sales, buy, sell, rho)
         sol = await self.portfolio_client.call('frontier', query,
-                                               follow_resource=True)
+                                               **self.get_follow_resource())
 
         if len(sol['frontier']) == 0:
             self.invalidate_frontier()

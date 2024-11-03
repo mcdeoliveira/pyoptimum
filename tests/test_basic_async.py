@@ -137,7 +137,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
 
         # call with slash
         response = await client.call('/portfolio', data,
-                                     follow_resource=True)
+                                     follow_resource=True, wait_time=1)
 
         obj = response.get('obj')
         self.assertTrue(math.fabs(math.sqrt(obj) - .045) < 1e-5)
@@ -146,7 +146,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         data['r'] = [.14, .08, 0]
         with self.assertRaises(pyoptimum.PyOptimumException):
             await client.call('portfolio', data,
-                              follow_resource=True)
+                              follow_resource=True, wait_time=1)
         self.assertIn('must be an array', client.detail)
 
         # call with errors
@@ -154,7 +154,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         data['options'] = { 'mu_max': -1 }
         with self.assertRaises(pyoptimum.PyOptimumException):
             await client.call('frontier', data,
-                              follow_resource=True)
+                              follow_resource=True, wait_time=1)
         self.assertIn('is larger than mu_max', client.detail)
 
     async def test_forbidden(self):

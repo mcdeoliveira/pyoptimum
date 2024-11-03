@@ -211,7 +211,8 @@ class AsyncClient(Client):
 
     async def call(self, entry_point: str, data: Any,
                    follow_resource: bool=False,
-                   wait_time: float=10, max_retries: int=18) -> Any:
+                   wait_time: float=10,
+                   max_retries: int=18) -> Any:
         """
         Calls the api ``entry_point`` with ``data``
 
