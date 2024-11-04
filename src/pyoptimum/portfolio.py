@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Literal, Any, Union, List, Tuple, Dict
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 from pyoptimum import AsyncClient
@@ -16,7 +17,7 @@ class Portfolio:
 
     ModelMethodLiteral = Literal['linear', 'linear-fractional']
 
-    MethodLiteral = Literal['approximate', 'optimal', 'none']
+    MethodLiteral = Literal['approximate', 'optimal']
     ConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales']
     ConstraintSignLiteral = Literal[LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL]
     ConstraintUnitLiteral = Literal['shares', 'value', 'percent value']
@@ -36,7 +37,7 @@ class Portfolio:
         self.portfolio = None
         self.frontier = None
         self.frontier_query_params = {}
-        self.frontier_method: Portfolio.MethodLiteral = 'none'
+        self.frontier_method: Portfolio.MethodLiteral = 'approximate'
         self.follow_resource = follow_resource
         self.max_retries = max_retries
         self.wait_time = wait_time
@@ -432,6 +433,27 @@ class Portfolio:
             else:
                 # return approximate if optimization failed
                 return await self.retrieve_recommendation(mu, method='approximate')
+
+        else:
+
+            raise Exception("Invalid method '%s'", method)
+
+    def add_to_frontier(self, mu: float, std: float, x: npt.NDArray) -> None:
+        """
+        Add point to frontier
+
+        :param mu: the return
+        :param std: the standard deviation
+        :param x: the portfolio values
+        """
+        assert self.has_frontier(), "Frontier has not been retrieved"
+
+        frontier = pd.concat((self.frontier,
+                              pd.DataFrame([(mu, std, x)],
+                                           columns=['mu', 'std', 'x'])),
+                             ignore_index=True)
+        frontier.sort_values(by=['mu'], inplace=True, ignore_index=True)
+        self.frontier = frontier
 
     def set_models_weights(self, model_weights: Dict[str, float]) -> None:
         """
