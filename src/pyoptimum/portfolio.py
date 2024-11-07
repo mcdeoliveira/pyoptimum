@@ -425,7 +425,7 @@ class Portfolio:
             data['mu'] = mu
 
             recs = await self.portfolio_client.call('portfolio', data,
-                                                    follow_resource=True)
+                                                    **self.get_follow_resource())
             if recs['status'] == 'optimal':
                 x = np.array(recs['x'])
                 _, std = self.get_model().return_and_variance(x)
