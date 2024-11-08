@@ -68,15 +68,11 @@ class Model:
 
     def to_dict(self, fields: Optional[Iterable]=None,
                 as_list: bool=False,
-                normalize=False) -> dict:
+                normalize_variance=False) -> dict:
         # normalize
-        alpha = np.max(self.std) ** 2 if normalize else 1.0
+        alpha = np.max(self.std) ** 2 if normalize_variance else 1.0
         if fields:
-            d = {f: getattr(self, f) for f in fields}
-            if normalize:
-                for f in ['Q', 'D']:
-                    if f in fields:
-                        d[f] /= alpha
+            d = {f: getattr(self, f) / alpha if f in ['Q', 'D'] else getattr(self, f) for f in fields}
         else:
             d = { 'r': self.r, 'D': self.D / alpha, 'F': self.F, 'Q': self.Q / alpha, 'std': self.std }
         return {k: v.tolist() for k, v in d.items()} if as_list else d
@@ -106,7 +102,7 @@ class Model:
 
     def return_and_variance(self, x: npt.NDArray) -> Tuple[float, float]:
         # normalize for calculating return and standard deviation
-        value = sum(x)
+        value = np.sum(x)
         if value < 0:
             value = -value
             warnings.warn("Total portfolio is negative")

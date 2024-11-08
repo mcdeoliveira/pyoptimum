@@ -158,6 +158,62 @@ class TestModel(unittest.TestCase):
         self.assertIsNot(model_1.Di, model_2.Di)
         self.assertIsNot(model_1.std, model_2.std)
 
+    def test_return(self):
+
+        from pyoptimum.model import Model
+
+        r = np.array([2,1])
+        q = np.array([1,2])
+        d = np.array([[1,-.1],[-.1,1]])
+        f = np.array([[1,-1],[1/2,1]])
+        data = {
+            'Q': q,
+            'F': f,
+            'D': d,
+            'r': r
+        }
+        x = np.array([1,3])
+        mu = r @ x / np.sum(x)
+        var0 = np.dot((q * x), x)
+        var1 = np.dot(np.dot(f @ d @ f.T, x) , x)
+        std = np.sqrt(var0 + var1) / np.sum(x)
+
+        # create model
+        model = Model(data)
+        np.testing.assert_array_equal(r, model.r)
+        np.testing.assert_array_equal(q, model.Q)
+        np.testing.assert_array_equal(f, model.F)
+        np.testing.assert_array_equal(d, model.D)
+
+        mu_, std_ = model.return_and_variance(x)
+        self.assertEqual(mu, mu_)
+        self.assertEqual(std, std_)
+
+        dic = model.to_dict()
+        np.testing.assert_array_equal(r, dic['r'])
+        np.testing.assert_array_equal(q, dic['Q'])
+        np.testing.assert_array_equal(f, dic['F'])
+        np.testing.assert_array_equal(d, dic['D'])
+
+        dic = model.to_dict(as_list=True)
+        self.assertListEqual(r.tolist(), dic['r'])
+        self.assertListEqual(q.tolist(), dic['Q'])
+        self.assertListEqual(f.tolist(), dic['F'])
+        self.assertListEqual(d.tolist(), dic['D'])
+
+        dic = model.to_dict(normalize_variance=True)
+        v = np.max(model.std) ** 2
+        np.testing.assert_array_equal(r, dic['r'])
+        np.testing.assert_array_equal(q/v, dic['Q'])
+        np.testing.assert_array_equal(f, dic['F'])
+        np.testing.assert_array_equal(d/v, dic['D'])
+
+        # check that model did not change
+        np.testing.assert_array_equal(r, model.r)
+        np.testing.assert_array_equal(q, model.Q)
+        np.testing.assert_array_equal(f, model.F)
+        np.testing.assert_array_equal(d, model.D)
+
     def test_unconstrained_frontier_and_return(self):
 
         from pyoptimum.model import Model

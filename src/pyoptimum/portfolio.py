@@ -79,7 +79,7 @@ class Portfolio:
         model = self.get_model()
         data = model.to_dict(('r', 'Q', 'D', 'F'),
                              as_list=True,
-                             normalize=True)
+                             normalize_variance=True)
 
         # has regularization
         if rho > 0:
@@ -569,7 +569,7 @@ class Portfolio:
     def apply_constraint(self, tickers: List[str],
                          function: ConstraintFunctionLiteral,
                          sign: ConstraintSignLiteral,
-                         value: Union[List[float], float],
+                         value: Union[List[float], npt.NDArray, float, int],
                          unit: ConstraintUnitLiteral,
                          short_sales: bool=True, buy: bool=True, sell: bool=True) -> None:
         """
@@ -590,8 +590,13 @@ class Portfolio:
 
         # make sure value is array
         if isinstance(value, (int, float)):
-            value = [value] * len(tickers)
-        value = np.array(value, dtype='float64')
+            value = np.array([value] * len(tickers), dtype='float64')
+        elif isinstance(value, list):
+            value = np.array(value)
+        elif isinstance(value, np.ndarray):
+            value = value.copy()
+        else:
+            raise ValueError("value must be int, float, list or NDArray")
 
         # make sure value is in shares
         shares = self.portfolio.loc[tickers, 'shares'].values
