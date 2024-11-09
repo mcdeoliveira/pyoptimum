@@ -194,16 +194,16 @@ class TestModel(unittest.TestCase):
         self.assertIsNot(model_1.Q, model_2.Q)
         self.assertIsNot(model_1.std, model_2.std)
 
-        with self.assertRaises(KeyError) as e:
+        with self.assertRaises(KeyError):
             data['F'] = np.random.normal(size=(5,3))
             Model(data)
 
-        with self.assertRaises(AssertionError) as e:
+        with self.assertRaises(AssertionError):
             del data['F']
             data['D'] = np.random.normal(size=(5,5))
             Model(data)
 
-        with self.assertRaises(AssertionError) as e:
+        with self.assertRaises(AssertionError):
             del data['D']
             data['Di'] = np.random.normal(size=(5,5))
             Model(data)
