@@ -1,8 +1,8 @@
 Reference
 =========
 
-.. autoclass:: pyoptimum.PyOptimumException
-   :members:
+Clients
+-------
 
 .. autoclass:: pyoptimum.Client
    :members:
@@ -10,8 +10,21 @@ Reference
 .. autoclass:: pyoptimum.AsyncClient
    :members:
 
+Model
+-----
+
 .. autoclass:: pyoptimum.portfolio.Model
    :members:
 
+Portfolio
+---------
+
 .. autoclass:: pyoptimum.portfolio.Portfolio
    :members:
+
+Others
+------
+
+.. autoclass:: pyoptimum.PyOptimumException
+   :members:
+

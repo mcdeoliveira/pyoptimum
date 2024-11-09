@@ -81,10 +81,39 @@ to produce::
 which indicates a mismatch between the dimension of the covariance matrix `Q` and the
 vector of expected returns `r`.
 
+Asynchronous Client
+-------------------
+
+:class:`pyoptimum.AsyncClient` is an an asynchronous version of :class:`pyoptimum.Client` with basically the same interface and some additional features.
+
+.. code-block:: python
+
+    from pyoptimum import AsyncClient
+    client = AsyncClient(username, password)
+
+one can then handle calls asynchronously as in
+
+.. code-block:: python
+
+    response = await client.call('portfolio', data)
+
+Besides the automatic token renewal feature, the :meth:`pyoptimum.AsyncClient:call` will
+also poll the APIs for asynchronous resources when computations are deferred. See
+`this case study <https://vicbee.net/case.html>`_ for more details on the architecture.
+
+Models and Portfolio
+--------------------
+
+The classes
+:class:`pyoptimum.portfolio.Portfolio` and :class:`pyoptimum.model.Model`
+implement additional functionality that further simplifies working with portfolios and mean variance models.
+Details are provided in the :ref:`Reference` section.
+
 Learn more
 ----------
 
-- See `Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ for a complete API documentation.
+- Checkout the detailed documentation in :ref:`Reference`.
+- See `Optimize API <https://optimize.vicbee.net/optimize/api/ui>`_ and `Models API <https://optimize.vicbee.net/models/api/ui>`_ for a complete API documentation.
 - Checkout `vicbee.net <https://vicbee.net>`_ and run the following jupiter notebook
 
     .. image:: https://mybinder.org/badge_logo.svg

@@ -80,7 +80,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.get_model()
 
         with self.assertRaises(AssertionError):
-            self.portfolio.set_models_weights({})
+            self.portfolio.set_model_weights({})
 
         # retrieve models
         market_tickers = ['^DJI']
@@ -106,7 +106,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.get_model()
 
         with self.assertRaises(AssertionError):
-            self.portfolio.set_models_weights({})
+            self.portfolio.set_model_weights({})
 
         # retrieve models
         market_tickers = ['^DJI']
@@ -154,12 +154,59 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
         # set model weights
         self.assertDictEqual(self.portfolio.model_weights, {rg: 1/3 for rg in ranges})
-        self.portfolio.set_models_weights({rg: v for rg, v in zip(ranges, [1,2,3])})
+        self.portfolio.set_model_weights({rg: v for rg, v in zip(ranges, [1, 2, 3])})
         self.assertDictEqual(self.portfolio.model_weights, {rg: v/6 for rg, v in zip(ranges, [1,2,3])})
         with self.assertRaises(AssertionError):
-            self.portfolio.set_models_weights({})
+            self.portfolio.set_model_weights({})
         with self.assertRaises(AssertionError):
-            self.portfolio.set_models_weights({rg: v for rg, v in zip(ranges, [1,-2,3])})
+            self.portfolio.set_model_weights({rg: v for rg, v in zip(ranges, [1, -2, 3])})
+
+    async def test_diagonal_models(self):
+
+        # try getting model before retrieving
+        with self.assertRaises(AssertionError):
+            self.portfolio.get_model()
+
+        with self.assertRaises(AssertionError):
+            self.portfolio.set_model_weights({})
+
+        # retrieve models
+        market_tickers = []
+        ranges = ['1mo', '6mo', '1y']
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+        await self.portfolio.retrieve_models(market_tickers, ranges, include_prices=True)
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+        self.assertEqual(self.portfolio.model_method, 'diagonal')
+
+        await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        from pyoptimum.model import Model
+
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
+        # retrieve frontier
+        await self.portfolio.retrieve_frontier(0, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        # retrieve unfeasible frontier
+        with self.assertRaises(ValueError):
+            await self.portfolio.retrieve_frontier(-100, 0, False, True, True)
+
+        # make sure it gets invalidated
+        self.assertFalse(self.portfolio.has_frontier())
+
+        # set model weights
+        self.assertDictEqual(self.portfolio.model_weights, {rg: 1/3 for rg in ranges})
+        self.portfolio.set_model_weights({rg: v for rg, v in zip(ranges, [1, 2, 3])})
+        self.assertDictEqual(self.portfolio.model_weights, {rg: v/6 for rg, v in zip(ranges, [1,2,3])})
+        with self.assertRaises(AssertionError):
+            self.portfolio.set_model_weights({})
+        with self.assertRaises(AssertionError):
+            self.portfolio.set_model_weights({rg: v for rg, v in zip(ranges, [1, -2, 3])})
 
 
 class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
@@ -230,6 +277,7 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.portfolio.has_frontier())
         np.testing.assert_array_almost_equal(self.portfolio.frontier['x'][0], -x0[0], 1e-4)
 
+
 class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
@@ -259,7 +307,7 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
             '6mo': 1,
             '1y': 2
         }
-        self.portfolio.set_models_weights(weights)
+        self.portfolio.set_model_weights(weights)
         weights = {
             '1mo': 3/6,
             '6mo': 1/6,

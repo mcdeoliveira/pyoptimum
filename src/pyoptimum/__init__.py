@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class PyOptimumException(Exception):
     """
-    pyoptimum Exception
+    Base calls for pyoptimum exceptions
     """
     pass
 
@@ -20,7 +20,7 @@ class PyOptimumException(Exception):
 class Client:
     """
     Client object to facilitate connection to the
-    `optimize.vicbee.net <https:optimize.vicbee.net>`_ optimization api
+    `optimize.vicbee.net <https:optimize.vicbee.net>`_ Optimize and Models API
 
     Calls will be made to a URL of the form:
 
@@ -163,7 +163,7 @@ class Client:
 class AsyncClient(Client):
     """
     Async client object to facilitate connection to the
-    `optimize.vicbee.net <https:optimize.vicbee.net>`_ optimization api
+    `optimize.vicbee.net <https:optimize.vicbee.net>`_ Optimize and Models API
 
     Calls will be made to a URL of the form:
 

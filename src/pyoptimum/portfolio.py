@@ -14,8 +14,30 @@ LESS_THAN_OR_EQUAL = "\u2264"
 GREATER_THAN_OR_EQUAL = "\u2265"
 
 class Portfolio:
+    """
+    Helper class to facilitate portfolio calculations using the Optimize and Models API.
 
-    ModelMethodLiteral = Literal['linear', 'linear-fractional']
+    Portfolio objects are constructed from two ``AsyncClient`` s, e.g.
+
+    .. code-block:: python
+
+        from pyoptimum import AsyncClient
+        from pyoptimum.portfolio import Portfolio
+        optimize_client = pyoptimum.AsyncClient(username=username, password=password, api='optimize')
+        models_client = pyoptimum.AsyncClient(username=username, password=password, api='models')
+        portfolio = Portfolio(self.portfolio_client, self.model_client)
+
+    The ``portfolio`` object can now be used to coordinate calls to both clients in order to build and manipulate portfolios.
+
+    Optional arguments are:
+
+    :param model_method: one of ['linear', 'linear-fractional', 'diagonal']
+    :param follow_resource: if True, will handle polling asynchronous resources
+    :param wait_time: how long to wait before pooling again (in seconds)
+    :param max_retries: how many times to retry before timing out
+    """
+
+    ModelMethodLiteral = Literal['linear', 'linear-fractional', 'diagonal']
 
     MethodLiteral = Literal['approximate', 'optimal']
     ConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales']
@@ -77,8 +99,7 @@ class Portfolio:
 
         # get model data
         model = self.get_model()
-        data = model.to_dict(('r', 'Q', 'D', 'F'),
-                             as_list=True,
+        data = model.to_dict(as_list=True,
                              normalize_variance=True)
 
         # has regularization
@@ -130,11 +151,23 @@ class Portfolio:
     def set_follow_resource(self, follow_resource: bool,
                             max_retries: int=18,
                             wait_time: Optional[float]=None) -> None:
+        """
+        Set parameters for pooling asynchronous resources
+
+        :param follow_resource: if True, will handle polling asynchronous resources
+        :param wait_time: how long to wait before pooling again (in seconds)
+        :param max_retries: how many times to retry before timing out
+        """
         self.follow_resource = follow_resource
         self.max_retries = max_retries
         self.wait_time = wait_time
 
     def get_follow_resource(self) -> dict:
+        """
+        Get parameters for pooling asynchronous resources
+
+        :return: dictionary with parameters
+        """
         results = {
             'follow_resource': self.follow_resource,
             'max_retries': self.max_retries
@@ -177,19 +210,19 @@ class Portfolio:
         return bool(self.models)
 
     def set_models(self, models: Dict[str, Union[dict, Model]],
-                   model_weights: Optional[Dict[str, float]]=None) -> None:
+                   model_weights: Optional[Dict[str, float]] = None) -> None:
         """
         Set portfolio models
 
         :param models: a dictionary with the models per range
-        :param model_weights: the model weights
+        :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
         """
         # add models
         self.models = {rg: Model(data) for rg, data in models.items()}
 
         # set model weights
         model_weights = model_weights or {rg: 1.0 for rg in models.keys()}
-        self.set_models_weights(model_weights)
+        self.set_model_weights(model_weights)
 
         # reinitialize frontier
         self.invalidate_frontier()
@@ -200,7 +233,11 @@ class Portfolio:
         """
         assert self.has_models(), "Models have not yet been retrieved"
 
-        if self.model_method == 'linear' or len(self.models) == 1:
+        if self.model_method == 'diagonal':
+            model = Model({attr: sum([weight * getattr(self.models[rg], attr)
+                                      for rg, weight in self.model_weights.items()])
+                           for attr in ['r', 'Q']})
+        elif self.model_method == 'linear':
             # linear model
             model = Model({attr: sum([weight * getattr(self.models[rg], attr)
                                       for rg, weight in self.model_weights.items()])
@@ -220,6 +257,9 @@ class Portfolio:
         return self.portfolio.index.tolist()
 
     def get_value(self) -> float:
+        """
+        :return: the total portfolio value
+        """
         try:
             return sum(self.portfolio['value ($)'])
         except (KeyError, TypeError):
@@ -262,7 +302,7 @@ class Portfolio:
 
     async def retrieve_prices(self) -> float:
         """
-        Retrieve the prices of the portfolio
+        Retrieve the latest prices of all portfolio assets
 
         :return: the total portfolio value
         """
@@ -281,25 +321,27 @@ class Portfolio:
                               market_tickers: List[str],
                               ranges: Union[str, List[str]],
                               end: datetime.date = datetime.date.today(),
+                              model_weights: Optional[Dict[str, float]] = None,
                               common_factors: bool = False,
-                              include_prices: bool = False,
-                              model_weights: Dict[str, float] = None) -> List[str]:
+                              include_prices: bool = False) -> List[str]:
         """
         Retrieve portfolio models based on market tickers
+
+        If ``market_tickers`` is empty then returns a diagonal model in which all
+        correlations are ignored.
 
         :param market_tickers: the market tickers
         :param ranges: the ranges to retrieve the portfolio models
         :param end: the last day to retrieve models
-        :param common_factors: whether to keep factors common
-        :param include_prices: whether to include prices on results
-        :param model_weights: the model weights
-        :return a list of messages
+        :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
+        :param common_factors: whether to keep factors common (default: ``False``)
+        :param include_prices: whether to include prices on results (default: ``False``)
+        :return: a list of messages
         """
 
         # retrieve models
         data = {
             'tickers': self.portfolio.index.tolist(),
-            'market': market_tickers,
             'end': str(end),
             'range': ranges,
             'options': {
@@ -307,6 +349,10 @@ class Portfolio:
                 'include_prices': include_prices
             }
         }
+        if market_tickers:
+            data['market'] = market_tickers
+        else:
+            self.model_method = 'diagonal'
         models = await self.model_client.call('model', data,
                                               **self.get_follow_resource())
 
@@ -334,7 +380,7 @@ class Portfolio:
         :param short_sales: whether to allow short sales
         :param buy: whether to allow buys
         :param sell: whether to allow sells
-        :param rho: regularization factor
+        :param rho: regularization factor (default: ``0.0``)
         """
 
         # assert models and prices are defined
@@ -375,7 +421,7 @@ class Portfolio:
         Retrieve or calculate recommendations
 
         :param mu: the expected return
-        :param method: whether to calculate approximate recommendations or retrieve from API
+        :param method: if `approximate` calculates approximate recommendations using the current frontier; if `exact` retrieve exact recommendation from the Optimize API
         :return:
         """
 
@@ -440,7 +486,7 @@ class Portfolio:
 
     def add_to_frontier(self, mu: float, std: float, x: npt.NDArray) -> None:
         """
-        Add point to frontier
+        Add point to current frontier
 
         :param mu: the return
         :param std: the standard deviation
@@ -455,7 +501,7 @@ class Portfolio:
         frontier.sort_values(by=['mu'], inplace=True, ignore_index=True)
         self.frontier = frontier
 
-    def set_models_weights(self, model_weights: Dict[str, float]) -> None:
+    def set_model_weights(self, model_weights: Dict[str, float]) -> None:
         """
         Set weights for the current portfolio models
 
