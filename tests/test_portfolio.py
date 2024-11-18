@@ -56,8 +56,6 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
     def test_split(self):
 
-        from pyoptimum.portfolio import Portfolio
-
         tickers = ['AAPL', 'MSFT', 'ASML', 'TQQQ']
         self.assertListEqual(tickers, self.portfolio.get_tickers())
         self.assertIsNone(self.portfolio.inactive_portfolio)
