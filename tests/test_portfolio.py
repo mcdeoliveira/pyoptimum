@@ -1,5 +1,6 @@
 import typing
 import unittest
+import datetime
 import os
 
 import numpy as np
@@ -53,6 +54,36 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         file = Path(__file__).parent / 'test.csv'
         self.portfolio.import_csv(file)
 
+    def test_split(self):
+
+        from pyoptimum.portfolio import Portfolio
+
+        tickers = ['AAPL', 'MSFT', 'ASML', 'TQQQ']
+        self.assertListEqual(tickers, self.portfolio.get_tickers())
+        self.assertIsNone(self.portfolio.inactive_portfolio)
+
+        self.portfolio.split(tickers)
+        self.assertListEqual(tickers, self.portfolio.get_tickers())
+        self.assertIsNone(self.portfolio.inactive_portfolio)
+
+        tickers = ['AAPL', 'MSFT', 'TQQQ']
+        self.portfolio.split(tickers)
+
+        self.assertListEqual(tickers, self.portfolio.get_tickers())
+        self.assertIsNotNone(self.portfolio.inactive_portfolio)
+        self.assertListEqual(self.portfolio.inactive_portfolio.index.to_list(), ['ASML'])
+
+        tickers = ['AAPL', 'MSFT', 'TQQQ', 'PORT', 'WINE']
+        with self.assertRaises(ValueError) as e:
+            self.portfolio.split(tickers)
+        self.assertIn("are not active in the current portfolio", str(e.exception))
+
+        tickers = []
+        with self.assertRaises(ValueError) as e:
+            self.portfolio.split(tickers)
+        self.assertIn("tickers cannot be empty", str(e.exception))
+
+
     async def test_prices(self):
 
         self.assertEqual(self.portfolio.get_value(), 0.0)
@@ -98,6 +129,60 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
         model = self.portfolio.get_model()
         self.assertIsInstance(model, Model)
+
+    async def test_model_without_data(self):
+
+        import pandas as pd
+
+        # try getting model before retrieving
+        with self.assertRaises(AssertionError):
+            self.portfolio.get_model()
+
+        with self.assertRaises(AssertionError):
+            self.portfolio.set_model_weights({})
+
+        # add new asset
+        self.portfolio.portfolio = pd.concat([
+            self.portfolio.portfolio,
+            pd.DataFrame({'shares': 1, 'lower': -np.inf, 'upper': np.inf},
+                         index=['NNE'])
+        ])
+        portfolio_tickers = self.portfolio.get_tickers()
+        self.assertListEqual(portfolio_tickers, ['AAPL', 'MSFT', 'ASML', 'TQQQ', 'NNE'])
+        #print(self.portfolio.portfolio)
+
+        # retrieve models
+        market_tickers = ['^DJI']
+        ranges = ['1mo', '6mo', '1y']
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+        messages, tickers, market = await self.portfolio.retrieve_models(market_tickers, ranges)
+        self.assertIsNone(self.portfolio.inactive_portfolio)
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+        self.assertListEqual(market, market_tickers)
+        self.assertListEqual(tickers, portfolio_tickers)
+
+        with self.assertRaises(AssertionError):
+            await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+
+        from pyoptimum.model import Model
+
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
+        # retrieve model without data
+        messages, tickers, market = await self.portfolio.retrieve_models(market_tickers, ranges,
+                                                                         end=datetime.date(2023, 12, 29),
+                                                                         include_prices=True)
+        self.assertCountEqual(tickers, ['AAPL', 'MSFT', 'ASML', 'TQQQ'])
+        self.assertCountEqual(market, market_tickers)
+        self.assertCountEqual(self.portfolio.get_tickers(), ['AAPL', 'MSFT', 'ASML', 'TQQQ'])
+        self.assertIsNotNone(self.portfolio.inactive_portfolio)
+        self.assertListEqual(self.portfolio.inactive_portfolio.index.to_list(), ['NNE'])
+        #print(self.portfolio.portfolio)
+        #print(self.portfolio.inactive_portfolio)
+
 
     async def test_models_with_prices(self):
 

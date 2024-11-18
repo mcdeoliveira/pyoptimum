@@ -57,6 +57,7 @@ class Portfolio:
         self.models: dict = {}
         self.model_weights: Dict[str, float] = {}
         self.portfolio = None
+        self.inactive_portfolio = None
         self.frontier = None
         self.frontier_query_params = {}
         self.frontier_method: Portfolio.MethodLiteral = 'approximate'
@@ -210,12 +211,14 @@ class Portfolio:
         return bool(self.models)
 
     def set_models(self, models: Dict[str, Union[dict, Model]],
-                   model_weights: Optional[Dict[str, float]] = None) -> None:
+                   model_weights: Optional[Dict[str, float]] = None,
+                   tickers: Optional[List[str]] = None) -> None:
         """
         Set portfolio models
 
         :param models: a dictionary with the models per range
         :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
+        :param tickers: list of model tickers
         """
         # add models
         self.models = {rg: Model(data) for rg, data in models.items()}
@@ -223,6 +226,10 @@ class Portfolio:
         # set model weights
         model_weights = model_weights or {rg: 1.0 for rg in models.keys()}
         self.set_model_weights(model_weights)
+
+        # reindex portfolio
+        if tickers is not None:
+            self.portfolio = self.portfolio.reindex(tickers)
 
         # reinitialize frontier
         self.invalidate_frontier()
@@ -299,6 +306,7 @@ class Portfolio:
 
         # remove all other columns and set portfolio
         self.portfolio = portfolio[['shares', 'lower', 'upper']]
+        self.inactive_portfolio = None
 
     async def retrieve_prices(self) -> float:
         """
@@ -317,13 +325,48 @@ class Portfolio:
 
         return value
 
+    def split(self, tickers: List[str]) -> None:
+        """
+        Split inactive portfolio
+
+        :param tickers: the list of active tickers in the portfolio
+        """
+        if len(tickers) == 0:
+            raise ValueError('tickers cannot be empty')
+
+        current_ticker_set = set(self.get_tickers())
+        ticker_set = set(tickers)
+        if current_ticker_set == ticker_set:
+            # do nothing
+            return
+
+        # are there unknown tickers?
+        unknown = ticker_set.difference(current_ticker_set)
+        if unknown:
+            raise ValueError(f"'{unknown}' are not active in the current portfolio")
+
+        # determine inactive and active tickers
+        inactive = list(current_ticker_set.difference(ticker_set))
+
+        # use list to preserve ordering
+        active = [t for t in self.get_tickers() if t not in inactive]
+
+        # remove inactive
+        self.inactive_portfolio = self.portfolio.loc[inactive]
+        self.portfolio = self.portfolio.loc[active]
+
+        # invalidate models and frontier
+        self.invalidate_frontier()
+        self.invalidate_model()
+
     async def retrieve_models(self,
                               market_tickers: List[str],
                               ranges: Union[str, List[str]],
                               end: datetime.date = datetime.date.today(),
                               model_weights: Optional[Dict[str, float]] = None,
                               common_factors: bool = False,
-                              include_prices: bool = False) -> List[str]:
+                              include_prices: bool = False) \
+            -> Tuple[List[str], List[str], List[str]]:
         """
         Retrieve portfolio models based on market tickers
 
@@ -356,17 +399,22 @@ class Portfolio:
         models = await self.model_client.call('model', data,
                                               **self.get_follow_resource())
 
+        # remove messages, tickers and market
+        messages = models.pop('messages')
+        tickers = models.pop('tickers')
+        market = models.pop('market')
+
+        # split inactive portfolio
+        self.split(tickers)
+
         if include_prices:
             # update prices
             self._update_prices(models.pop('prices'))
 
-        # remove messages
-        messages = models.pop('messages')
-
         # set models
-        self.set_models(models, model_weights)
+        self.set_models(models, model_weights, tickers=tickers)
 
-        return messages
+        return messages, tickers, market
 
     async def retrieve_frontier(self,
                                 cashflow: float, max_sales: float,
