@@ -54,6 +54,7 @@ class Portfolio:
         'holdings': 'sum',
         'return': 'return'
     }
+    InverseFunctionTable = {v: k for k, v in FunctionTable.items()}
 
     def __init__(self,
                  portfolio_client: AsyncClient,
