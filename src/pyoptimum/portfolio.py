@@ -7,11 +7,12 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from pyoptimum import AsyncClient
+from pyoptimum import AsyncClient, PyOptimumException
 from pyoptimum.model import Model
 
 LESS_THAN_OR_EQUAL = "\u2264"
 GREATER_THAN_OR_EQUAL = "\u2265"
+EQUAL = "\u003d"
 
 class Portfolio:
     """
@@ -41,8 +42,18 @@ class Portfolio:
 
     MethodLiteral = Literal['approximate', 'optimal']
     ConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales']
-    ConstraintSignLiteral = Literal[LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL]
+    ConstraintSignLiteral = Literal[LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL, EQUAL]
     ConstraintUnitLiteral = Literal['shares', 'value', 'percent value']
+    GroupConstraintFunctionLiteral = Literal['purchases', 'sales', 'holdings', 'short sales', 'return']
+    GroupConstraintUnitLiteral = Literal['value', 'percent value']
+
+    FunctionTable = {
+        'sales': 'sales',
+        'purchases': 'buys',
+        'short sales': 'leverage',
+        'holdings': 'sum',
+        'return': 'return'
+    }
 
     def __init__(self,
                  portfolio_client: AsyncClient,
@@ -64,6 +75,8 @@ class Portfolio:
         self.follow_resource = follow_resource
         self.max_retries = max_retries
         self.wait_time = wait_time
+        self.groups = {}
+        self.group_constraints = []
 
     @staticmethod
     def _locate_value(value: Any, column: str, df: pd.DataFrame) -> Tuple[Optional[pd.Series], Optional[pd.Series]]:
@@ -100,36 +113,41 @@ class Portfolio:
 
         # get model data
         model = self.get_model()
-        data = model.to_dict(as_list=True,
-                             normalize_variance=True)
+        data: Dict[str, Any] = model.to_dict(as_list=True,
+                                             normalize_variance=True)
 
         # has regularization
         if rho > 0:
             data['rho'] = rho
 
         # get portfolio data
-        value0 = self.get_value()
-        value = value0 + cashflow
+        h0 = self.get_value()
+        h = h0 + cashflow
+        if h0 == 0 and cashflow == 0:
+            raise ValueError("Cashflow cannot be zero on a portfolio with no shares")
+
+        if h == 0:
+            raise ValueError("Cashflow cannot be equal to current holdings")
+
+        # scaling
+        scaling = np.fabs(h)
+
         x0 = self.portfolio['value (%)']
-        data['x0'] = x0.tolist()
+        data['x0'] = ((h0 / scaling) * x0).tolist()
 
         # check bound in max_sales
         if np.isfinite(max_sales) and max_sales < 0:
             raise ValueError('max_sales must be non-negative')
 
         # add cashflow and constraints
-        if value0 > 0.0:
-            data['cashflow'] = cashflow / value0
-            if np.isfinite(max_sales):
-                data['constraints'] = [
-                    {'label': 'sales', 'function': 'sales', 'bounds': max_sales / value0}]
-        else:
-            if cashflow == 0:
-                raise ValueError("Cashflow cannot be zero on a portfolio with no shares")
-            if np.isfinite(max_sales) and not short_sales:
-                sell = False
-
-            data['cashflow'] = 1
+        constraints_ = []
+        data['cashflow'] = cashflow / scaling
+        if np.isfinite(max_sales):
+            constraints_.append({
+                'label': 'sales',
+                'function': 'sales',
+                'bounds': max_sales / scaling
+            })
 
         data['options'] = {
             'short': short_sales,
@@ -139,13 +157,34 @@ class Portfolio:
 
         # has lower bound
         if np.isfinite(self.portfolio['lower']).any():
-            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / value
+            xlo = self.portfolio['lower'] * self.portfolio['close ($)'] / scaling
             data['xlo'] = xlo.tolist()
 
         # has upper bound
         if np.isfinite(self.portfolio['upper']).any():
-            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / value
+            xup = self.portfolio['upper'] * self.portfolio['close ($)'] / scaling
             data['xup'] = xup.tolist()
+
+        # group constraints
+        sets = set()
+        for cnstr in self.group_constraints:
+            sets.add(cnstr['set'])
+            bounds = cnstr['bounds']
+            divider = 1 if cnstr['function'] == 'returns' else scaling
+            if isinstance(bounds, (list, tuple)) :
+                bounds = [b/divider for b in bounds]
+            else:
+                bounds /= divider
+            constraints_.append({**cnstr, 'bounds': bounds})
+
+        if len(sets) > 0:
+            # add sets
+            tickers = self.get_tickers()
+            data['sets'] = [{'label': s, 'indices': [tickers.index(e) for e in self.groups[s]]} for s in sets]
+
+        if len(constraints_) > 0:
+            # add constraints
+            data['constraints'] = constraints_
 
         return data
 
@@ -293,6 +332,27 @@ class Portfolio:
         if 'shares' not in portfolio.columns:
             portfolio['shares'] = 0.0
 
+        # has groups?
+        self.groups = {}
+        self.group_constraints = []
+        if 'groups' in portfolio.columns:
+            def add_to_group(row):
+                if isinstance(row['groups'], str):
+                    for g in row['groups'].split('|'):
+                        g = g.strip()
+                        if g:
+                            if g in self.groups:
+                                self.groups[g].append(row.name)
+                            else:
+                                self.groups[g] = [row.name]
+            # add to groups
+            portfolio.apply(add_to_group, axis=1)
+
+            # check for uniqueness
+            for k, v in self.groups.items():
+                if len(set(v)) != len(v):
+                    raise PyOptimumException(f'Group {k} members are not unique')
+
         # make sure shares are float
         portfolio = portfolio.astype({"shares": float})
 
@@ -438,8 +498,12 @@ class Portfolio:
         # retrieve frontier
         query = self._get_portfolio_query(cashflow, max_sales,
                                           short_sales, buy, sell, rho)
-        sol = await self.portfolio_client.call('frontier', query,
-                                               **self.get_follow_resource())
+        try:
+            sol = await self.portfolio_client.call('frontier', query,
+                                                   **self.get_follow_resource())
+        except PyOptimumException as e:
+            self.invalidate_frontier()
+            raise e
 
         if len(sol['frontier']) == 0:
             self.invalidate_frontier()
@@ -586,7 +650,7 @@ class Portfolio:
     def set_model_method(self, method: ModelMethodLiteral):
         self.model_method = method
 
-    def get_portfolio_dataframe(self):
+    def get_portfolio_dataframe(self) -> pd.DataFrame:
         """
         :return: the portfolio as a dataframe
         """
@@ -606,6 +670,34 @@ class Portfolio:
             portfolio_df['upper ($)'] = portfolio_df['close ($)'] * portfolio_df['upper']
 
         return portfolio_df
+
+    def get_recommendation_dataframe(self, x: npt.NDArray, cashflow: float) -> pd.DataFrame:
+        """
+        :param x: the portfolio weights
+        :param cashflow: the cashflow
+        :return: the portfolio recommendation as a dataframe
+        """
+
+        assert np.fabs(np.sum(x) - 1) < 1e-4, "portfolio weights do not sum to one"
+
+        if self.has_models() and self.has_prices():
+            x0 = self.portfolio['value (%)']
+            h0 = self.get_value()
+            h = h0 + cashflow
+            value = x * h
+            change_value = value - x0 * h0
+            df = pd.DataFrame(data={
+                'ticker': self.get_tickers(),
+                'shares': value / self.portfolio['close ($)'],
+                'value ($)': value,
+                'value (%)': x,
+                'change (shares)': change_value / self.portfolio['close ($)'],
+                'change ($)': change_value,
+            })
+        else:
+            df = pd.DataFrame(columns=['ticker', 'shares', 'value ($)', 'value (%)', 'change (shares)', 'change ($)'])
+
+        return df
 
     def get_frontier_range(self):
         """
@@ -709,21 +801,33 @@ class Portfolio:
                 lb = shares - value
             elif sign == GREATER_THAN_OR_EQUAL:
                 ub = shares - value
+            elif sign == EQUAL:
+                ub = shares - value
+                lb = ub
         elif function == 'purchases':
             if sign == LESS_THAN_OR_EQUAL:
                 ub = shares + value
             elif sign == GREATER_THAN_OR_EQUAL:
                 lb = shares + value
+            elif sign == EQUAL:
+                ub = shares + value
+                lb = ub
         elif function == 'short sales':
             if sign == LESS_THAN_OR_EQUAL:
                 lb = -value
             elif sign == GREATER_THAN_OR_EQUAL:
                 ub = -value
+            elif sign == EQUAL:
+                ub = -value
+                lb = ub
         elif function == 'holdings':
             if sign == LESS_THAN_OR_EQUAL:
                 ub = value
             elif sign == GREATER_THAN_OR_EQUAL:
                 lb = value
+            elif sign == EQUAL:
+                ub = value
+                lb = ub
 
         # short sales
         if not short_sales:
@@ -747,8 +851,215 @@ class Portfolio:
                 ub = np.where(ub < shares, shares, ub)
 
         # apply bounds
-        if lb is not None:
-            self.portfolio.loc[tickers, 'lower'] = np.maximum(self.portfolio.loc[tickers, 'lower'], lb)
+        if sign == EQUAL:
+            self.portfolio.loc[tickers, 'lower'] = lb
+            self.portfolio.loc[tickers, 'upper'] = ub
+        else:
+            if lb is not None:
+                self.portfolio.loc[tickers, 'lower'] = np.maximum(self.portfolio.loc[tickers, 'lower'], lb)
 
-        if ub is not None:
-            self.portfolio.loc[tickers, 'upper'] = np.minimum(self.portfolio.loc[tickers, 'upper'], ub)
+            if ub is not None:
+                self.portfolio.loc[tickers, 'upper'] = np.minimum(self.portfolio.loc[tickers, 'upper'], ub)
+
+    def _get_group_constraint(self,
+                              group: str,
+                              function: GroupConstraintFunctionLiteral) -> Tuple[int, Optional[dict]]:
+        for i, c in enumerate(self.group_constraints):
+            if c['function'] == function and c['set'] == group:
+                return i, c
+        return -1, None
+
+    def create_group(self, label: str, tickers: List[str]) -> None:
+        """
+        Create group
+
+        :param label: the group label
+        :param tickers: the group tickers
+        """
+        if label in self.groups:
+            raise ValueError(f"Group {label} is already in the current portfolio.")
+        unknown_tickers = set(tickers) - set(self.get_tickers())
+        if unknown_tickers:
+            raise ValueError(f"Tickers {list(unknown_tickers)} are not in the current portfolio.")
+        self.groups[label] = tickers
+
+    def remove_group(self, label: str) -> None:
+        """
+        Remove group and all its constraints
+
+        :param label: the group label
+        """
+        if label not in self.groups:
+            raise ValueError(f"Group {label} is not in the current portfolio.")
+        # remove constraints first
+        self.group_constraints = [c for c in self.group_constraints if c['set'] != label]
+        # then remove group
+        del self.groups[label]
+
+    def remove_group_constraint(self,
+                                group: str,
+                                function: GroupConstraintFunctionLiteral) -> Optional[dict]:
+        """
+        Remove group constraints
+
+        :param group: the group
+        :param function: the function
+        """
+        index, constraint = self._get_group_constraint(group, Portfolio.FunctionTable[function])
+        if index >= 0:
+            del self.group_constraints[index]
+        return constraint
+
+    def apply_group_constraint(self,
+                               group: str,
+                               function: GroupConstraintFunctionLiteral,
+                               sign: ConstraintSignLiteral,
+                               value: Union[float, int],
+                               unit: GroupConstraintUnitLiteral,
+                               short_sales: bool = True, buy: bool = True,
+                               sell: bool = True) -> None:
+        """
+        Add group constraint
+
+        :param group: the group label
+        :param function: the function to apply on the left-hand side of the inequality
+        :param sign: the sign of the inequality
+        :param value: the value of the right-hand side of the inequality
+        :param unit: the unit in which the constraint is expressed
+        :param short_sales: whether to allow short sales
+        :param buy: whether to allow buying
+        :param sell: whether to allow selling
+        """
+        # make sure value is scalar
+        if not isinstance(value, (int, float)):
+            raise ValueError("value must be int or float")
+
+        # make sure group exists
+        if group not in self.groups:
+            raise ValueError("group does not exist")
+
+        # short sales
+        if not short_sales and function == 'short sales':
+            raise ValueError('short sales are not currently allowed')
+
+        # no buys
+        if not buy and function == 'purchases':
+            raise ValueError('purchases are not currently allowed')
+
+        # no sells
+        if not sell and function == 'sales':
+            raise ValueError('sales are not currently allowed')
+
+        # check sign
+        if function == 'sales' or function == 'purchases' or function == 'short sales':
+            if sign == GREATER_THAN_OR_EQUAL:
+                raise ValueError('greater than or equal inequality not supported')
+            elif sign == EQUAL:
+                raise ValueError('equality not supported')
+
+        # make sure value is in dollars
+        tickers = self.groups[group]
+        shares = self.portfolio.loc[tickers, 'shares'].values
+        close = self.portfolio.loc[tickers, 'close ($)'].values
+        dollars = shares * close
+        if unit == 'percent value':
+            value *= dollars.sum() / 100
+        elif unit != 'value':
+            raise ValueError(f"unit '{unit}' is not supported")
+
+        # translate function
+        function = Portfolio.FunctionTable[function]
+
+        # is there already a constraint of the same type?
+        index, constraint = self._get_group_constraint(group, function)
+        if constraint is None:
+            # create constraint if needed
+            constraint = {
+                'set': group,
+                'function': function,
+                'bounds': np.inf if function == 'sales' or function == 'buys' or function == 'leverage' else [-np.inf, np.inf]
+            }
+
+        # set bounds
+        if function == 'sales' or function == 'buys' or function == 'leverage':
+            constraint['bounds'] = min(value, constraint['bounds'])
+        else:
+            if sign == LESS_THAN_OR_EQUAL:
+                constraint['bounds'][1] = min(value, constraint['bounds'][1])
+            elif sign == GREATER_THAN_OR_EQUAL:
+                constraint['bounds'][0] = max(value, constraint['bounds'][0])
+            elif sign == EQUAL:
+                constraint['bounds'] = [value, value]
+
+            # check bounds
+            if constraint['bounds'][0] > constraint['bounds'][1]:
+                raise ValueError('constraint lower bound is larger than upper bound')
+
+        # create constraint?
+        if index == -1:
+            self.group_constraints.append(constraint)
+        else:
+            self.group_constraints[index] = constraint
+
+    def get_group_dataframe(self, x: Optional[npt.NDArray]=None, cashflow: float=0):
+        """
+        :param x: the portfolio weights (default=None)
+        :param cashflow: the cashflow (default=0)
+        :return: the portfolio groups as a dataframe
+        """
+
+        if not self.groups:
+            return pd.DataFrame(columns=['group', 'tickers', 'return (%)', 'std (%)', 'value ($)', 'value (%)'])
+
+        # create dataframe
+        data = [{'group': k, 'tickers': v}  for k, v in self.groups.items()]
+        df = pd.DataFrame(data=data)
+        df.set_index('group', inplace=True)
+
+        if self.has_prices():
+            h0 = self.get_value()
+            h = h0 + cashflow
+            x0 = self.portfolio['value (%)']
+
+            if x is None:
+                x = x0
+                recommendation = False
+                assert cashflow == 0, 'cashflow must be zero without a recommendation'
+            else:
+                recommendation = True
+
+            value = x * h
+            change = value - self.portfolio['value ($)']
+
+            model = self.get_model() if self.has_models() else None
+            data_val = np.zeros((len(self.groups), 2))
+            data_ret = np.zeros((len(self.groups), 2))
+            data_chg = np.zeros((len(self.groups), 3))
+            for i, (group, tickers) in enumerate(self.groups.items()):
+                # group indices
+                index = x0.index.isin(tickers)
+                # calculate group value and weight
+                val, weight = value[index].sum(), x[index].sum()
+                data_val[i, :] = [val, weight]
+                # calculate group weights
+                xg = x.copy()
+                xg[~index] = 0.0
+                xg /= xg.sum()
+                if model is not None:
+                    # calculate group return and variance
+                    mu, std = model.return_and_variance(xg)
+                    data_ret[i, :] = [mu, std]
+                if recommendation:
+                    # calculate change
+                    change_ = change[index]
+                    data_chg[i, :] = [
+                        change_.sum(), change_[change_ >= 0].sum(), -change_[change_ <= 0].sum()
+                    ]
+            # assemble data frame
+            if model is not None:
+                df[['return (%)', 'std (%)']] = data_ret
+            df[['value ($)', 'value (%)']] = data_val
+            if recommendation:
+                df[['change ($)', 'purchases ($)', 'sales ($)']] = data_chg
+
+        return df

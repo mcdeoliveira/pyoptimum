@@ -5,6 +5,7 @@ import os
 
 import numpy as np
 
+
 username = 'demo@optimize.vicbee.net'
 password = 'optimize'
 base_url = os.getenv('TEST_BASE_URL', 'https://optimize.vicbee.net')
@@ -36,6 +37,8 @@ class TestBasic(unittest.TestCase):
         self.assertListEqual(portfolio.portfolio.columns.tolist(),['shares', 'lower', 'upper'])
         self.assertListEqual(portfolio.portfolio.index.tolist(),['AAPL', 'MSFT', 'ASML', 'TQQQ'])
         self.assertListEqual(portfolio.portfolio['shares'].tolist(), [1, 10, 0, 13])
+        self.assertCountEqual(portfolio.groups['g1'], ['AAPL', 'TQQQ'])
+        self.assertCountEqual(portfolio.groups['g2'], ['AAPL', 'ASML'])
 
         self.assertEqual(portfolio.get_value(), 0.0)
 
@@ -210,6 +213,8 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
 
     async def test_frontier(self):
 
+        from pyoptimum import PyOptimumException
+
         # retrieve prices
         self.assertFalse(self.portfolio.has_prices())
         await self.portfolio.retrieve_prices()
@@ -229,8 +234,9 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.portfolio.has_frontier())
 
         # retrieve unfeasible frontier
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PyOptimumException) as e:
             await self.portfolio.retrieve_frontier(-100, 0, False, True, True)
+        self.assertIn('constraint is not feasible', str(e.exception))
 
         # make sure it gets invalidated
         self.assertFalse(self.portfolio.has_frontier())
@@ -245,6 +251,8 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.set_model_weights({rg: v for rg, v in zip(ranges, [1, -2, 3])})
 
     async def test_diagonal_models(self):
+
+        from pyoptimum import PyOptimumException
 
         # try getting model before retrieving
         with self.assertRaises(AssertionError):
@@ -276,8 +284,9 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.portfolio.has_frontier())
 
         # retrieve unfeasible frontier
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PyOptimumException) as e:
             await self.portfolio.retrieve_frontier(-100, 0, False, True, True)
+        self.assertIn('constraint is not feasible', str(e.exception))
 
         # make sure it gets invalidated
         self.assertFalse(self.portfolio.has_frontier())
@@ -356,12 +365,12 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         x0 = self.portfolio.frontier['x']
 
         # retrieve frontier
-        await self.portfolio.retrieve_frontier(-1000, 100, True, True, True)
+        await self.portfolio.retrieve_frontier(-100, 100, True, True, True)
         self.assertTrue(self.portfolio.has_frontier())
         np.testing.assert_array_almost_equal(self.portfolio.frontier['x'][0], -x0[0], 1e-4)
 
 
-class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
+class TestWithPortfolio(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
 
@@ -380,6 +389,9 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
         self.ranges = ['1mo', '6mo', '1y']
         await self.portfolio.retrieve_models(self.market_tickers, self.ranges,
                                              include_prices=True)
+
+
+class TestModelMethods(TestWithPortfolio):
 
     async def test_model_methods(self):
 
@@ -443,9 +455,12 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
                                              (1/6) * self.portfolio.models['6mo'].r +
                                              (2/6) * self.portfolio.models['1y'].r)
 
+
+class TestPortfolioFunctions(TestWithPortfolio):
+
     async def test_apply_constraint(self):
 
-        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL, Portfolio
+        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL, EQUAL, Portfolio
 
         tickers = ['MSFT']
         value = 1
@@ -458,6 +473,30 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
                 elif function == 'purchases' or function == 'holdings':
                     self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                self.portfolio.remove_constraints(tickers)
+
+        sign = GREATER_THAN_OR_EQUAL
+        for function in typing.get_args(Portfolio.ConstraintFunctionLiteral):
+            for unit in typing.get_args(Portfolio.ConstraintUnitLiteral):
+                self.portfolio.apply_constraint(tickers, function, sign, value, unit)
+                if function == 'sales' or function == 'short sales':
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                elif function == 'purchases' or function == 'holdings':
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                self.portfolio.remove_constraints(tickers)
+
+        sign = EQUAL
+        for function in typing.get_args(Portfolio.ConstraintFunctionLiteral):
+            for unit in typing.get_args(Portfolio.ConstraintUnitLiteral):
+                self.portfolio.apply_constraint(tickers, function, sign, value, unit)
+                if function == 'sales' or function == 'short sales':
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
+                elif function == 'purchases' or function == 'holdings':
+                    self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
                     self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
                 self.portfolio.remove_constraints(tickers)
 
@@ -516,3 +555,340 @@ class TestPortfolioFunctions(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse(np.isfinite(self.portfolio.portfolio.loc[tickers, 'lower']).all())
                     self.assertTrue(np.isfinite(self.portfolio.portfolio.loc[tickers, 'upper']).all())
                 self.portfolio.remove_constraints(tickers)
+
+
+class TestPortfolioGroup(TestWithPortfolio):
+
+    async def test_apply_constraint(self):
+
+        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL, GREATER_THAN_OR_EQUAL, EQUAL, Portfolio
+
+        bounds = 1
+        sign = LESS_THAN_OR_EQUAL
+        for group in ['g1', 'g2']:
+            tickers = self.portfolio.groups[group]
+            for function in ['sales', 'purchases', 'short sales']:
+                for unit in typing.get_args(Portfolio.GroupConstraintUnitLiteral):
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    if c is not None:
+                        c['bounds'] = np.inf
+                    self.portfolio.apply_group_constraint(group, function, sign, bounds, unit)
+                    if unit == 'percent value':
+                        value = bounds * (self.portfolio.portfolio.loc[tickers, 'close ($)'] * self.portfolio.portfolio.loc[tickers, 'shares']).sum() / 100
+                    else:   # if unit == 'value':
+                        value = bounds
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    self.assertIsNotNone(c)
+                    self.assertEqual(c['bounds'], value)
+
+        bounds = 1
+        sign = LESS_THAN_OR_EQUAL
+        for group in ['g1', 'g2']:
+            tickers = self.portfolio.groups[group]
+            for function in ['holdings', 'return']:
+                for unit in typing.get_args(Portfolio.GroupConstraintUnitLiteral):
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    if c is not None:
+                        c['bounds'] = [-np.inf, np.inf]
+                    self.portfolio.apply_group_constraint(group, function, sign, bounds, unit)
+                    if unit == 'percent value':
+                        value = bounds * (self.portfolio.portfolio.loc[tickers, 'close ($)'] * self.portfolio.portfolio.loc[tickers, 'shares']).sum() / 100
+                    else:   # if unit == 'value':
+                        value = bounds
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    self.assertIsNotNone(c)
+                    self.assertEqual(c['bounds'][1], value)
+
+        bounds = -1
+        sign = GREATER_THAN_OR_EQUAL
+        for group in ['g1', 'g2']:
+            tickers = self.portfolio.groups[group]
+            for function in ['holdings', 'return']:
+                for unit in typing.get_args(Portfolio.GroupConstraintUnitLiteral):
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    if c is not None:
+                        c['bounds'] = [-np.inf, np.inf]
+                    self.portfolio.apply_group_constraint(group, function, sign, bounds, unit)
+                    if unit == 'percent value':
+                        value = bounds * (self.portfolio.portfolio.loc[tickers, 'close ($)'] * self.portfolio.portfolio.loc[tickers, 'shares']).sum() / 100
+                    else:   # if unit == 'value':
+                        value = bounds
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    self.assertIsNotNone(c)
+                    self.assertEqual(c['bounds'][0], value)
+
+        bounds = 1
+        sign = EQUAL
+        for group in ['g1', 'g2']:
+            tickers = self.portfolio.groups[group]
+            for function in ['holdings', 'return']:
+                for unit in typing.get_args(Portfolio.GroupConstraintUnitLiteral):
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    if c is not None:
+                        c['bounds'] = [-np.inf, np.inf]
+                    self.portfolio.apply_group_constraint(group, function, sign, bounds, unit)
+                    if unit == 'percent value':
+                        value = bounds * (self.portfolio.portfolio.loc[tickers, 'close ($)'] * self.portfolio.portfolio.loc[tickers, 'shares']).sum() / 100
+                    else:   # if unit == 'value':
+                        value = bounds
+                    _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+                    self.assertIsNotNone(c)
+                    self.assertEqual(c['bounds'][0], value)
+                    self.assertEqual(c['bounds'][1], value)
+
+        # test existing bound, simple
+        group = 'g2'
+        function = 'purchases'
+        unit = 'value'
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        c['bounds'] = np.inf
+        bounds = 10
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'], 10)
+        bounds = 20
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'], 10)
+        bounds = 5
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'], 5)
+
+        # test existing bound, double
+        group = 'g1'
+        function = 'holdings'
+        unit = 'value'
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        c['bounds'] = [-np.inf, np.inf]
+        bounds = 10
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -np.inf)
+        self.assertEqual(c['bounds'][1], 10)
+        bounds = 20
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -np.inf)
+        self.assertEqual(c['bounds'][1], 10)
+        bounds = 5
+        self.portfolio.apply_group_constraint(group, function, LESS_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -np.inf)
+        self.assertEqual(c['bounds'][1], 5)
+        bounds = -10
+        self.portfolio.apply_group_constraint(group, function, GREATER_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -10)
+        self.assertEqual(c['bounds'][1], 5)
+        bounds = -20
+        self.portfolio.apply_group_constraint(group, function, GREATER_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -10)
+        self.assertEqual(c['bounds'][1], 5)
+        bounds = -5
+        self.portfolio.apply_group_constraint(group, function, GREATER_THAN_OR_EQUAL, bounds, unit)
+        _, c = self.portfolio._get_group_constraint(group, Portfolio.FunctionTable[function])
+        self.assertIsNotNone(c)
+        self.assertEqual(c['bounds'][0], -5)
+        self.assertEqual(c['bounds'][1], 5)
+
+        # test some errors
+        group = 'g2'
+        function = 'purchases'
+        unit = 'value'
+        with self.assertRaises(ValueError) as e:
+            self.portfolio.apply_group_constraint(group, function, GREATER_THAN_OR_EQUAL, bounds, unit)
+        self.assertIn('greater than or equal inequality not supported', str(e.exception))
+        with self.assertRaises(ValueError) as e:
+            self.portfolio.apply_group_constraint(group, function, EQUAL, bounds, unit)
+        self.assertIn('equality not supported', str(e.exception))
+
+        constraint = self.portfolio.remove_group_constraint(group, function)
+        self.assertIsNotNone(constraint)
+        self.assertEqual(constraint['set'], group)
+        self.assertEqual(constraint['function'], 'buys')
+
+    def test_group_df(self):
+
+        import pandas as pd
+
+        df = self.portfolio.get_portfolio_dataframe()
+        gdf = self.portfolio.get_group_dataframe()
+        self.assertIsInstance(gdf, pd.DataFrame)
+        for group, tickers in self.portfolio.groups.items():
+            self.assertEqual(gdf.loc[group, 'value ($)'], df.loc[tickers]['value ($)'].sum())
+            self.assertEqual(gdf.loc[group, 'value (%)'], df.loc[tickers]['value (%)'].sum())
+            self.assertListEqual(gdf.loc[group, 'tickers'], tickers)
+
+    async def test_group_holdings_constraint(self):
+
+        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL
+
+        # retrieve frontier
+        cf = 0
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        # print(f'total = {self.portfolio.get_value()}')
+        # for i, row in self.portfolio.frontier.iterrows():
+        #     x = row['x']
+        #     gdf = self.portfolio.get_group_dataframe(x, cf)
+        #     print(gdf.loc[['g1']])
+
+        # apply holdings group constraint
+        x = self.portfolio.frontier.loc[3]['x']
+        # df = self.portfolio.get_recommendation_dataframe(x, cf)
+        # df.loc['Total'] = df.sum(numeric_only=True)
+        # print(df)
+        gdf = self.portfolio.get_group_dataframe()
+        # print(gdf)
+        value = gdf.loc['g1', 'value ($)']
+        bound = .5 * value
+        # print(value, bound)
+        self.portfolio.apply_group_constraint('g1', 'holdings', LESS_THAN_OR_EQUAL, bound, 'value')
+        self.assertEqual(len(self.portfolio.group_constraints), 1)
+
+        await self.portfolio.retrieve_frontier(cf, 1.2*bound, False, True, True)
+        # print(self.portfolio.frontier_query_params)
+
+        for i, row in self.portfolio.frontier.iterrows():
+            x = row['x']
+            gdf = self.portfolio.get_group_dataframe(x, cf)
+            # print(gdf.loc[['g1']])
+            self.assertLessEqual(gdf.loc['g1', 'value ($)'], 1.01*bound)
+
+        # remove group constraint
+        self.portfolio.remove_group_constraint('g1', 'holdings')
+        self.assertEqual(len(self.portfolio.group_constraints), 0)
+
+        # retrieve frontier, this time with non-zero cashflow
+        cf = 1000
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        # print(f'total = {self.portfolio.get_value()}')
+        # for i, row in self.portfolio.frontier.iterrows():
+        #     x = row['x']
+        #     gdf = self.portfolio.get_group_dataframe(x, cf)
+        #     print(gdf.loc[['g1']])
+
+        # apply holdings group constraint
+        x = self.portfolio.frontier.loc[3]['x']
+        # df = self.portfolio.get_recommendation_dataframe(x, cf)
+        # df.loc['Total'] = df.sum(numeric_only=True)
+        # print(df)
+        gdf = self.portfolio.get_group_dataframe()
+        # print(gdf)
+        value = gdf.loc['g1', 'value ($)']
+        bound = .5 * value
+        # print(value, bound)
+        self.portfolio.apply_group_constraint('g1', 'holdings', LESS_THAN_OR_EQUAL, bound, 'value')
+        self.assertEqual(len(self.portfolio.group_constraints), 1)
+
+        await self.portfolio.retrieve_frontier(cf, 1.1 * bound, False, True, True)
+        # print(self.portfolio.frontier_query_params)
+
+        for i, row in self.portfolio.frontier.iterrows():
+            x = row['x']
+            gdf = self.portfolio.get_group_dataframe(x, cf)
+            # print(gdf.loc[['g1']])
+            self.assertLessEqual(gdf.loc['g1', 'value ($)'], 1.01*bound)
+
+        # remove group constraint
+        self.portfolio.remove_group_constraint('g1', 'holdings')
+        self.assertEqual(len(self.portfolio.group_constraints), 0)
+
+    async def test_group_sales_constraint(self):
+
+        from pyoptimum.portfolio import LESS_THAN_OR_EQUAL
+
+        # retrieve frontier
+        cf = 0
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+        # print(self.portfolio.frontier_query_params)
+
+        # print(f'total = {self.portfolio.get_value()}')
+        # for i, row in self.portfolio.frontier.iterrows():
+        #     x = row['x']
+        #     gdf = self.portfolio.get_group_dataframe(x, cf)
+        #     print(gdf.loc[['g1']])
+
+        # apply sales group constraint
+        x = self.portfolio.frontier.loc[3]['x']
+        # print(self.portfolio.get_recommendation_dataframe(x, cf))
+        # print(self.portfolio.get_recommendation_dataframe(x, cf).sum())
+        gdf = self.portfolio.get_group_dataframe(x, cf)
+        # print(gdf)
+        value = gdf.loc['g1', ['purchases ($)', 'sales ($)']].values
+        function, value = ('sales', value[1]) if value[1] > value[0] else ('purchases', value[0])
+        bound = .8 * value
+        # print(value, bound, function)
+        self.portfolio.apply_group_constraint('g1', function,
+                                              LESS_THAN_OR_EQUAL,
+                                              bound, 'value')
+        self.assertEqual(len(self.portfolio.group_constraints), 1)
+
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        # print(self.portfolio.frontier_query_params)
+
+        for i, row in self.portfolio.frontier.iterrows():
+            x = row['x']
+            gdf = self.portfolio.get_group_dataframe(x, cf)
+            # print(gdf.loc[['g1']])
+            if function == 'sales':
+                self.assertLessEqual(gdf.loc['g1', 'sales ($)'], 1.01*bound)
+            else:
+                self.assertLessEqual(-gdf.loc['g1', 'purchases ($)'], 1.01*bound)
+
+        # remove group constraint
+        self.portfolio.remove_group_constraint('g1', function)
+        self.assertEqual(len(self.portfolio.group_constraints), 0)
+
+        # retrieve frontier, this time with non-zero cashflow
+        cf = 1000
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+        # print(self.portfolio.frontier_query_params)
+
+        # print(f'total = {self.portfolio.get_value()}')
+        # for i, row in self.portfolio.frontier.iterrows():
+        #     x = row['x']
+        #     gdf = self.portfolio.get_group_dataframe(x, cf)
+        #     print(gdf.loc[['g1']])
+
+        # apply sales group constraint
+        x = self.portfolio.frontier.loc[3]['x']
+        # print(self.portfolio.get_recommendation_dataframe(x, cf))
+        # print(self.portfolio.get_recommendation_dataframe(x, cf).sum())
+        gdf = self.portfolio.get_group_dataframe(x, cf)
+        # print(gdf)
+        value = gdf.loc['g1', ['purchases ($)', 'sales ($)']].values
+        function, value = ('sales', value[1]) if value[1] > value[0] else ('purchases', value[0])
+        bound = .8 * value
+        # print(value, bound, function)
+        self.portfolio.apply_group_constraint('g1', function,
+                                              LESS_THAN_OR_EQUAL,
+                                              bound, 'value')
+        self.assertEqual(len(self.portfolio.group_constraints), 1)
+
+        await self.portfolio.retrieve_frontier(cf, 100, False, True, True)
+        # print(self.portfolio.frontier_query_params)
+
+        for i, row in self.portfolio.frontier.iterrows():
+            x = row['x']
+            gdf = self.portfolio.get_group_dataframe(x, cf)
+            # print(gdf.loc[['g1']])
+            if function == 'sales':
+                self.assertLessEqual(gdf.loc['g1', 'sales ($)'], bound)
+            else:
+                self.assertLessEqual(-gdf.loc['g1', 'purchases ($)'], bound)
