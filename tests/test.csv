@@ -1,5 +1,5 @@
-ticker, shares
-AAPL, 1
-MSFT, 10
-ASML, 0
-TQQQ, 13
+ticker, shares, groups
+AAPL, 1, g1|g2
+MSFT, 10,
+ASML, 0,g2
+TQQQ, 13,g1
