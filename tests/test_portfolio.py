@@ -126,7 +126,8 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         ranges = Portfolio.BasicRanges
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_custom_models(market_tickers, ranges)
+        end = datetime.date(2024, 12, 13)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges, end=end)
         self.assertFalse(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
