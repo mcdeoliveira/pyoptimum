@@ -206,9 +206,10 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         from pyoptimum.portfolio import Portfolio
         market_tickers = list(Portfolio.BasicMarket.keys())
         ranges = Portfolio.BasicRanges
+        end = datetime.date(2024, 12, 13)
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_custom_models(market_tickers, ranges, include_prices=True)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges, end=end, include_prices=True)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
@@ -232,7 +233,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(portfolio_copy.has_prices())
         self.assertTrue(portfolio_copy.has_models())
 
-        await self.portfolio.retrieve_basic_models(include_prices=True)
+        await self.portfolio.retrieve_basic_models(end=end, include_prices=True)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
