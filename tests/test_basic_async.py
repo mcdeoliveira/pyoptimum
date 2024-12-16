@@ -34,14 +34,15 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
     async def test_optimize(self):
 
         client = pyoptimum.AsyncClient(username=username, password=password,
-                                  base_url=base_url)
+                                       base_url=base_url)
 
         self.assertIsNone(client.token)
         await client.get_token()
         self.assertIsNotNone(client.token)
 
         # wrong password
-        client = pyoptimum.AsyncClient(username=username, password=password + 'wrong')
+        client = pyoptimum.AsyncClient(username=username, password=password + 'wrong',
+                                       base_url=base_url)
 
         self.assertIsNone(client.token)
         with self.assertRaises(aiohttp.client_exceptions.ClientResponseError):
@@ -160,7 +161,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
     async def test_forbidden(self):
 
         client = pyoptimum.AsyncClient(username=username, password=password,
-                                  base_url=base_url)
+                                       base_url=base_url)
 
         data = {
             'A': [[2]],

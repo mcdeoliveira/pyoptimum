@@ -56,6 +56,13 @@ class Portfolio:
     }
     InverseFunctionTable = {v: k for k, v in FunctionTable.items()}
 
+    BasicMarket = {
+        '^GSPC': "S&P 500",
+        '^RUT': "Russel 2000",
+        '^IXIC': "NASDAQ"
+    }
+    BasicRanges = ['1mo', '3mo', '6mo', '1y', '2y', '5y']
+
     def __init__(self,
                  portfolio_client: AsyncClient,
                  model_client: AsyncClient,
@@ -97,7 +104,7 @@ class Portfolio:
 
         # add prices to dataframe
         prices = pd.DataFrame.from_dict(prices, orient='index',
-                                        columns=['timestamp', 'close'])
+                                        columns=['timestamp', 'close', 'first_quote'])
 
         # update portfolio value and weights
         self.portfolio['close ($)'] = prices['close']
@@ -420,16 +427,70 @@ class Portfolio:
         self.invalidate_frontier()
         self.invalidate_model()
 
-    async def retrieve_models(self,
-                              market_tickers: List[str],
-                              ranges: Union[str, List[str]],
-                              end: datetime.date = datetime.date.today(),
-                              model_weights: Optional[Dict[str, float]] = None,
-                              common_factors: bool = False,
-                              include_prices: bool = False) \
+    def _set_models(self,
+                    response: dict,
+                    include_prices: bool,
+                    model_weights: Optional[Dict[str, float]] = None):
+
+        # remove messages, tickers and market
+        messages = response.pop('messages')
+        tickers = response.pop('tickers')
+        market = response.pop('market')
+
+        # split inactive portfolio
+        self.split(tickers)
+
+        if include_prices:
+            # update prices
+            self._update_prices(response.pop('prices'))
+
+        # get models
+        models = response.pop('models')
+
+        # set models
+        self.set_models(models, model_weights, tickers=tickers)
+
+        return messages, tickers, market
+
+    async def retrieve_basic_models(self,
+                                    end: datetime.date = datetime.date.today(),
+                                    model_weights: Optional[Dict[str, float]] = None,
+                                    include_prices: bool = False)\
             -> Tuple[List[str], List[str], List[str]]:
         """
-        Retrieve portfolio models based on market tickers
+        Retrieve basic portfolio models based on market tickers
+
+        If ``market_tickers`` is empty then returns a diagonal model in which all
+        correlations are ignored.
+
+        :param end: the last day to retrieve models
+        :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
+        :param include_prices: whether to include prices on results (default: ``False``)
+        :return: a list of messages
+        """
+
+        # retrieve models
+        data = {
+            'tickers': self.portfolio.index.tolist(),
+            'end': str(end),
+            'options': {
+                'include_prices': include_prices
+            }
+        }
+        response = await self.model_client.call('basic', data,
+                                                **self.get_follow_resource())
+        return self._set_models(response, include_prices, model_weights)
+
+    async def retrieve_custom_models(self,
+                                     market_tickers: List[str],
+                                     ranges: Union[str, List[str]],
+                                     end: datetime.date = datetime.date.today(),
+                                     model_weights: Optional[Dict[str, float]] = None,
+                                     common_factors: bool = False,
+                                     include_prices: bool = False) \
+            -> Tuple[List[str], List[str], List[str]]:
+        """
+        Retrieve custom portfolio models based on market tickers
 
         If ``market_tickers`` is empty then returns a diagonal model in which all
         correlations are ignored.
@@ -457,25 +518,9 @@ class Portfolio:
             data['market'] = market_tickers
         else:
             self.model_method = 'diagonal'
-        models = await self.model_client.call('model', data,
-                                              **self.get_follow_resource())
-
-        # remove messages, tickers and market
-        messages = models.pop('messages')
-        tickers = models.pop('tickers')
-        market = models.pop('market')
-
-        # split inactive portfolio
-        self.split(tickers)
-
-        if include_prices:
-            # update prices
-            self._update_prices(models.pop('prices'))
-
-        # set models
-        self.set_models(models, model_weights, tickers=tickers)
-
-        return messages, tickers, market
+        response = await self.model_client.call('custom', data,
+                                                **self.get_follow_resource())
+        return self._set_models(response, include_prices, model_weights)
 
     async def retrieve_frontier(self,
                                 cashflow: float, max_sales: float,

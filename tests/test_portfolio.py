@@ -17,8 +17,11 @@ class TestBasic(unittest.TestCase):
 
         import pyoptimum
 
-        self.portfolio_client = pyoptimum.AsyncClient(username=username, password=password,api='optimize')
-        self.model_client = pyoptimum.AsyncClient(username=username, password=password,api='models')
+        self.portfolio_client = pyoptimum.AsyncClient(username=username,
+                                                      password=password,
+                                                      api='optimize', base_url=base_url)
+        self.model_client = pyoptimum.AsyncClient(username=username, password=password,
+                                                  api='models', base_url=base_url)
 
     def test_constructor(self):
 
@@ -50,8 +53,11 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         import pyoptimum
         from pyoptimum.portfolio import Portfolio
 
-        self.portfolio_client = pyoptimum.AsyncClient(username=username, password=password,api='optimize')
-        self.model_client = pyoptimum.AsyncClient(username=username, password=password,api='models')
+        self.portfolio_client = pyoptimum.AsyncClient(username=username,
+                                                      password=password,
+                                                      api='optimize', base_url=base_url)
+        self.model_client = pyoptimum.AsyncClient(username=username, password=password,
+                                                  api='models', base_url=base_url)
         self.portfolio = Portfolio(self.portfolio_client, self.model_client)
         from pathlib import Path
         file = Path(__file__).parent / 'test.csv'
@@ -115,16 +121,18 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.set_model_weights({})
 
         # retrieve models
-        market_tickers = ['^DJI']
-        ranges = ['1mo', '6mo', '1y']
+        from pyoptimum.portfolio import Portfolio
+        market_tickers = list(Portfolio.BasicMarket.keys())
+        ranges = Portfolio.BasicRanges
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges)
         self.assertFalse(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(AssertionError) as e:
             await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+        self.assertIn('Either prices or models are missing', str(e.exception))
 
         from pyoptimum.model import Model
 
@@ -157,7 +165,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         ranges = ['1mo', '6mo', '1y']
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        messages, tickers, market = await self.portfolio.retrieve_models(market_tickers, ranges)
+        messages, tickers, market = await self.portfolio.retrieve_custom_models(market_tickers, ranges)
         self.assertIsNone(self.portfolio.inactive_portfolio)
         self.assertFalse(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
@@ -173,9 +181,9 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(model, Model)
 
         # retrieve model without data
-        messages, tickers, market = await self.portfolio.retrieve_models(market_tickers, ranges,
-                                                                         end=datetime.date(2023, 12, 29),
-                                                                         include_prices=True)
+        messages, tickers, market = await self.portfolio.retrieve_custom_models(market_tickers, ranges,
+                                                                                end=datetime.date(2023, 12, 29),
+                                                                                include_prices=True)
         self.assertCountEqual(tickers, ['AAPL', 'MSFT', 'ASML', 'TQQQ'])
         self.assertCountEqual(market, market_tickers)
         self.assertCountEqual(self.portfolio.get_tickers(), ['AAPL', 'MSFT', 'ASML', 'TQQQ'])
@@ -195,21 +203,49 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
             self.portfolio.set_model_weights({})
 
         # retrieve models
-        market_tickers = ['^DJI']
-        ranges = ['1mo', '6mo', '1y']
+        from pyoptimum.portfolio import Portfolio
+        market_tickers = list(Portfolio.BasicMarket.keys())
+        ranges = Portfolio.BasicRanges
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges, include_prices=True)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges, include_prices=True)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
-        await self.portfolio.retrieve_frontier(0, 0, False, True, True)
+        await self.portfolio.retrieve_frontier(100, 0, False, True, True)
         self.assertTrue(self.portfolio.has_frontier())
 
         from pyoptimum.model import Model
 
         model = self.portfolio.get_model()
         self.assertIsInstance(model, Model)
+
+        # repeat with basic model
+        import copy
+        portfolio_copy = copy.copy(self.portfolio)
+
+        # reinitialize
+        self.setUp()
+        self.assertFalse(self.portfolio.has_prices())
+        self.assertFalse(self.portfolio.has_models())
+
+        self.assertTrue(portfolio_copy.has_prices())
+        self.assertTrue(portfolio_copy.has_models())
+
+        await self.portfolio.retrieve_basic_models(include_prices=True)
+        self.assertTrue(self.portfolio.has_prices())
+        self.assertTrue(self.portfolio.has_models())
+
+        await self.portfolio.retrieve_frontier(100, 0, False, True, True)
+        self.assertTrue(self.portfolio.has_frontier())
+
+        model = self.portfolio.get_model()
+        self.assertIsInstance(model, Model)
+
+        # models should be equal
+        for v1, v2 in zip(self.portfolio.get_model().to_dict().values(),
+                          portfolio_copy.get_model().to_dict().values()):
+            np.testing.assert_array_equal(v1, v2)
 
     async def test_frontier(self):
 
@@ -225,7 +261,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         ranges = ['1mo', '6mo', '1y']
         self.assertTrue(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
@@ -266,7 +302,7 @@ class TestPortfolio(unittest.IsolatedAsyncioTestCase):
         ranges = ['1mo', '6mo', '1y']
         self.assertFalse(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges, include_prices=True)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges, include_prices=True)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
         self.assertEqual(self.portfolio.model_method, 'diagonal')
@@ -308,9 +344,10 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         from pyoptimum.portfolio import Portfolio
 
         self.portfolio_client = pyoptimum.AsyncClient(username=username,
-                                                      password=password, api='optimize')
+                                                      password=password, api='optimize',
+                                                      base_url=base_url)
         self.model_client = pyoptimum.AsyncClient(username=username, password=password,
-                                                  api='models')
+                                                  api='models', base_url=base_url)
         self.portfolio = Portfolio(self.portfolio_client, self.model_client)
         from pathlib import Path
         file = Path(__file__).parent / 'test_zero.csv'
@@ -350,7 +387,7 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         ranges = ['1mo', '6mo', '1y']
         self.assertTrue(self.portfolio.has_prices())
         self.assertFalse(self.portfolio.has_models())
-        await self.portfolio.retrieve_models(market_tickers, ranges)
+        await self.portfolio.retrieve_custom_models(market_tickers, ranges)
         self.assertTrue(self.portfolio.has_prices())
         self.assertTrue(self.portfolio.has_models())
 
@@ -365,7 +402,7 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         x0 = self.portfolio.frontier['x']
 
         # retrieve frontier
-        await self.portfolio.retrieve_frontier(-100, 100, True, True, True)
+        await self.portfolio.retrieve_frontier(-100, 200, True, True, True)
         self.assertTrue(self.portfolio.has_frontier())
         np.testing.assert_array_almost_equal(self.portfolio.frontier['x'][0], -x0[0], 1e-4)
 
@@ -377,8 +414,12 @@ class TestWithPortfolio(unittest.IsolatedAsyncioTestCase):
         import pyoptimum
         from pyoptimum.portfolio import Portfolio
 
-        self.portfolio_client = pyoptimum.AsyncClient(username=username, password=password,api='optimize')
-        self.model_client = pyoptimum.AsyncClient(username=username, password=password,api='models')
+        self.portfolio_client = pyoptimum.AsyncClient(username=username,
+                                                      password=password,
+                                                      api='optimize',
+                                                      base_url=base_url)
+        self.model_client = pyoptimum.AsyncClient(username=username, password=password,
+                                                  api='models', base_url=base_url)
         self.portfolio = Portfolio(self.portfolio_client, self.model_client)
         from pathlib import Path
         file = Path(__file__).parent / 'test.csv'
@@ -387,8 +428,8 @@ class TestWithPortfolio(unittest.IsolatedAsyncioTestCase):
         # retrieve models and price
         self.market_tickers = ['^DJI', '^RUT']
         self.ranges = ['1mo', '6mo', '1y']
-        await self.portfolio.retrieve_models(self.market_tickers, self.ranges,
-                                             include_prices=True)
+        await self.portfolio.retrieve_custom_models(self.market_tickers, self.ranges,
+                                                    include_prices=True)
 
 
 class TestModelMethods(TestWithPortfolio):

@@ -90,7 +90,8 @@ class TestBasic(unittest.TestCase):
         self.assertIsNotNone(client.token)
 
         # wrong password
-        client = pyoptimum.Client(username=username, password=password + 'wrong')
+        client = pyoptimum.Client(username=username, password=password + 'wrong',
+                                  base_url=base_url)
 
         self.assertIsNone(client.token)
         self.assertRaises(requests.exceptions.HTTPError, client.get_token)
