@@ -401,7 +401,6 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         # retrieve frontier
         await self.portfolio.retrieve_frontier(1000, 100, False, True, True)
         self.assertTrue(self.portfolio.has_frontier())
-        x0 = self.portfolio.frontier['x']
 
         # retrieve frontier
         with self.assertRaises(ValueError) as e:
