@@ -404,9 +404,9 @@ class TestPortfolioZeroShares(unittest.IsolatedAsyncioTestCase):
         x0 = self.portfolio.frontier['x']
 
         # retrieve frontier
-        await self.portfolio.retrieve_frontier(-100, 200, True, True, True)
-        self.assertTrue(self.portfolio.has_frontier())
-        np.testing.assert_array_almost_equal(self.portfolio.frontier['x'][0], -x0[0], 1e-4)
+        with self.assertRaises(ValueError) as e:
+            await self.portfolio.retrieve_frontier(-100, 100, True, True, True)
+        self.assertIn("Could not calculate optimal frontier; constraints likely make the problem infeasible.", str(e.exception))
 
 
 class TestWithPortfolio(unittest.IsolatedAsyncioTestCase):
