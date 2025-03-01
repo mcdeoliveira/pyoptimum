@@ -1,5 +1,6 @@
 import unittest
 import os
+from typing import List
 
 import aiohttp
 import math
@@ -65,6 +66,18 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(client.token)
         await client.get_token()
         self.assertIsNotNone(client.token)
+
+        transactions = [
+            {'timestamp': '2023-05-24', 'assets': {'AAPL': 1.2}},
+            {'timestamp': '2023-05-25', 'assets': {'AAPL': -0.2, 'INTC': 3.2}}
+        ]
+
+        # retrieve prices
+        values: List[dict] = await client.call('/portfolio/value',
+                                               data=transactions,
+                                               method='post')
+
+        print(values)
 
     async def test_portfolio(self):
 
