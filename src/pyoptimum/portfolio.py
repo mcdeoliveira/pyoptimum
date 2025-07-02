@@ -331,10 +331,21 @@ class Portfolio:
         # sanitize column names
         portfolio.columns = [c.strip() for c in portfolio.columns]
 
-        # set ticker as index
-        assert 'ticker' in portfolio.columns, "Portfolio must contain a column " \
-                                              "named 'ticker'"
-        portfolio.set_index('ticker', inplace=True)
+        # import dataframe
+        self.import_dataframe(portfolio)
+
+    def import_dataframe(self, portfolio: pd.DataFrame) -> None:
+        """
+        Import portfolio from dataframe
+
+        :param portfolio: the dataframe
+        """
+
+        if portfolio.index.name != 'ticker':
+            # set ticker as index
+            assert 'ticker' in portfolio.columns, "Portfolio must contain a column " \
+                                                  "named 'ticker'"
+            portfolio.set_index('ticker', inplace=True)
 
         # initialize shares
         if 'shares' not in portfolio.columns:
@@ -455,7 +466,8 @@ class Portfolio:
     async def retrieve_basic_models(self,
                                     end: datetime.date = datetime.date.today(),
                                     model_weights: Optional[Dict[str, float]] = None,
-                                    include_prices: bool = False)\
+                                    include_prices: bool = False,
+                                    horizon: int = 1)\
             -> Tuple[List[str], List[str], List[str]]:
         """
         Retrieve basic portfolio models based on market tickers
@@ -466,6 +478,7 @@ class Portfolio:
         :param end: the last day to retrieve models
         :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
         :param include_prices: whether to include prices on results (default: ``False``)
+        :param horizon: the investment horizon in days (default: ``1``)
         :return: a list of messages
         """
 
@@ -474,7 +487,8 @@ class Portfolio:
             'tickers': self.portfolio.index.tolist(),
             'end': str(end),
             'options': {
-                'include_prices': include_prices
+                'include_prices': include_prices,
+                'horizon': horizon
             }
         }
         response = await self.model_client.call('basic', data,
@@ -487,7 +501,10 @@ class Portfolio:
                                      end: datetime.date = datetime.date.today(),
                                      model_weights: Optional[Dict[str, float]] = None,
                                      common_factors: bool = False,
-                                     include_prices: bool = False) \
+                                     include_prices: bool = False,
+                                     trim_weekends: bool = True,
+                                     horizon: int = 1,
+                                     weights: Literal['linear', 'quadratic'] = 'linear') \
             -> Tuple[List[str], List[str], List[str]]:
         """
         Retrieve custom portfolio models based on market tickers
@@ -501,6 +518,9 @@ class Portfolio:
         :param model_weights: the model weights (default: ``None``, which is the same as equal weights)
         :param common_factors: whether to keep factors common (default: ``False``)
         :param include_prices: whether to include prices on results (default: ``False``)
+        :param trim_weekends: whether to trim weekends (default: ``True``)
+        :param horizon: the investment horizon in days (default: ``1``)
+        :param weights: the model weights (default: ``linear``)
         :return: a list of messages
         """
 
@@ -511,7 +531,10 @@ class Portfolio:
             'range': ranges,
             'options': {
                 'common': common_factors,
-                'include_prices': include_prices
+                'include_prices': include_prices,
+                'trim_weekends': trim_weekends,
+                'horizon': horizon,
+                'weights': weights
             }
         }
         if market_tickers:

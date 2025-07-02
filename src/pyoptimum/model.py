@@ -135,6 +135,17 @@ class Model:
             d = { 'r': self.r, 'D': self.D / alpha, 'F': self.F, 'Q': self.Q / alpha }
         return {k: v.tolist() for k, v in d.items()} if as_list else d
 
+    def get_mean_and_variance(self) -> Tuple[npt.NDArray, npt.NDArray]:
+        """
+        Returns vectors with the mean and variance
+        :return: a tuple of vectors
+        """
+        var = self.Q
+        if self.F is not None:
+            df = self.F @ self.D
+            var += np.sum(self.F * df, 1)
+        return self.r, var
+
     def return_and_variance(self, x: npt.NDArray) -> Tuple[float, float]:
         """
         Calculate the expected return and standard deviation of the portoflio holdings ``x``
