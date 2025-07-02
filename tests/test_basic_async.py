@@ -1,6 +1,5 @@
 import unittest
 import os
-from typing import List
 
 import aiohttp
 import math
